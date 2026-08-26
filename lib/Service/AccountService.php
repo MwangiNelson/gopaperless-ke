@@ -355,29 +355,6 @@ class AccountService {
 	}
 
 	/**
-	 * Accept the active Terms of Service documents for an existing account.
-	 *
-	 * @return array{message:string,uid:string,acceptedTerms:int}
-	 */
-	public function acceptTerms(string $userId): array {
-		$userId = trim($userId);
-		if ($userId === '') {
-			throw new LibresignException('User ID is required');
-		}
-
-		$user = $this->userManager->get($userId);
-		if ($user === null) {
-			throw new LibresignException('Account not found');
-		}
-
-		return [
-			'message' => 'Success',
-			'uid' => $user->getUID(),
-			'acceptedTerms' => $this->acceptTermsForUserId($user->getUID()),
-		];
-	}
-
-	/**
 	 * Record acceptance for every active Terms of Service document. Calls are
 	 * idempotent: documents the user has already accepted are left untouched.
 	 *

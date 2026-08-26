@@ -210,40 +210,6 @@ class AccountController extends AEnvironmentAwareController implements ISignatur
 	}
 
 	/**
-	 * Record acceptance of every active Terms of Service document for an
-	 * existing account. This supports external onboarding flows that create an
-	 * account first and obtain the user's acceptance separately.
-	 *
-	 * @param string $userId User ID of the existing account.
-	 * @return DataResponse<Http::STATUS_OK, array{message:string,uid:string,acceptedTerms:int}, array{}>|DataResponse<Http::STATUS_UNPROCESSABLE_ENTITY, array{message:string}, array{}>
-	 *
-	 * 200: Terms accepted successfully
-	 * 422: The account could not be found or the acceptance could not be recorded.
-	 */
-	#[NoAdminRequired]
-	#[CORS]
-	#[NoCSRFRequired]
-	#[PublicPage]
-	#[ApiRoute(
-		verb: 'POST',
-		url: '/api/{apiVersion}/account/accept-terms',
-		requirements: ['apiVersion' => '(v1)']
-	)]
-	public function acceptTerms(string $userId): DataResponse {
-		try {
-			return new DataResponse(
-				$this->accountService->acceptTerms($userId),
-				Http::STATUS_OK,
-			);
-		} catch (\Throwable $e) {
-			return new DataResponse(
-				['message' => $e->getMessage()],
-				Http::STATUS_UNPROCESSABLE_ENTITY,
-			);
-		}
-	}
-
-	/**
 	 * Create PFX file using self-signed certificate
 	 *
 	 * @param string $signPassword The password that will be used to encrypt the certificate file

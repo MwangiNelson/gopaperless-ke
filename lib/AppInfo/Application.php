@@ -17,6 +17,7 @@ use OCA\Libresign\Events\SendSignNotificationEvent;
 use OCA\Libresign\Events\SignedEvent;
 use OCA\Libresign\Events\SignRequestCanceledEvent;
 use OCA\Libresign\Files\TemplateLoader;
+use OCA\Libresign\Listener\AcceptTermsAfterOidcLoginListener;
 use OCA\Libresign\Listener\BeforeNodeDeletedListener;
 use OCA\Libresign\Listener\LoadAdditionalListener;
 use OCA\Libresign\Listener\MailNotifyListener;
@@ -37,6 +38,7 @@ use OCP\AppFramework\Bootstrap\IRegistrationContext;
 use OCP\Files\Cache\CacheEntryRemovedEvent;
 use OCP\Files\Events\Node\BeforeNodeDeletedEvent;
 use OCP\User\Events\UserDeletedEvent;
+use OCP\User\Events\UserLoggedInEvent;
 
 /**
  * @codeCoverageIgnore
@@ -97,6 +99,7 @@ class Application extends App implements IBootstrap {
 		$context->registerEventListener(SignedEvent::class, TwofactorGatewayListener::class);
 
 		$context->registerEventListener(UserDeletedEvent::class, UserDeletedListener::class);
+		$context->registerEventListener(UserLoggedInEvent::class, AcceptTermsAfterOidcLoginListener::class);
 
 		$context->registerDashboardWidget(PendingSignaturesWidget::class);
 	}
