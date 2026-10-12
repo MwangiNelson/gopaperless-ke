@@ -56,8 +56,8 @@ const ecosystem = [
 </script>
 
 <style scoped lang="scss">
-/* Two tiers, the about line and trust chain above the legal links. It sits below
-   the first screen, so visitors reach it by scrolling. */
+/* Two tiers, the about line and trust chain above the legal links. On desktop
+   the landing fits it on the first screen (PublicUpload.vue, pu--fit). */
 .pu__eco {
 	flex: none;
 	display: flex;

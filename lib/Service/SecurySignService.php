@@ -23,8 +23,11 @@ class SecurySignService {
 	private const READINESS_CACHE_KEY = 'libresign.securysign.readiness';
 	private const DOWN_KEY = 'libresign.securysign.down_until';
 	private const DOWN_SECONDS = 60;
-	/** Bump to re-import every mirrored signature; 3 dropped the composed card. */
-	public const CARD_VERSION = 3;
+	/**
+	 * Bump to re-import every mirrored signature. 3 dropped the composed card;
+	 * 4 takes the handwriting alone instead of SecurySign's assembled card.
+	 */
+	public const CARD_VERSION = 4;
 
 	public function __construct(
 		private IAppConfig $config,
@@ -272,8 +275,8 @@ class SecurySignService {
 
 	/**
 	 * What SecurySign holds for this user, or null when they are not ready yet.
-	 * Returns the card alongside the certificate id so a caller can both gate on
-	 * readiness and mirror the signature without asking twice.
+	 * Returns the handwriting alongside the certificate id so a caller can both
+	 * gate on readiness and mirror the signature without asking twice.
 	 *
 	 * @param array{sub: string, issuer: string, accessToken: string}|null $identity
 	 * @return array{certificateId: string, imagePngBase64: string, issuer: string, serial: string, validFrom: string, validUntil: string}|null
@@ -302,13 +305,16 @@ class SecurySignService {
 		if ((string)($signature['certificateId'] ?? '') !== (string)$leaf['certificateId']) {
 			return null;
 		}
-		$image = base64_decode($signature['imagePngBase64'] ?? '', true);
+		// The row says which certificate the signature belongs to. Its image is
+		// SecurySign's assembled card, and the built-in signing card would draw
+		// that card inside itself, so the handwriting comes from its own route.
+		$image = $this->handwriting($identity) ?? base64_decode($signature['imagePngBase64'] ?? '', true);
 		if (!is_string($image) || !str_starts_with($image, "\x89PNG\r\n\x1a\n")) {
 			throw new \RuntimeException('SecurySign returned an invalid visible signature.', 503);
 		}
 		return [
 			'certificateId' => (string)$leaf['certificateId'],
-			'imagePngBase64' => (string)$signature['imagePngBase64'],
+			'imagePngBase64' => base64_encode($image),
 			'issuer' => (string)($leaf['issuer'] ?? 'SecurySign'),
 			'serial' => (string)($leaf['serialNumberHex'] ?? ''),
 			'validFrom' => self::day($leaf['validFrom'] ?? null),
@@ -316,6 +322,32 @@ class SecurySignService {
 		];
 	}
 
+
+	/**
+	 * The user's handwriting alone, as SecurySign serves it for an RP to place
+	 * in its own documents: no name, certificate details or QR code. Null where
+	 * a SecurySign deployment has no such route (404), and readiness falls back
+	 * to the card.
+	 *
+	 * @param array{sub: string, issuer: string, accessToken: string} $identity
+	 */
+	public function handwriting(array $identity): ?string {
+		$base = self::origin($this->config->getValueString(Application::APP_ID, 'securysign_url'));
+		$response = $this->send('get', $base . '/api/signature/visible/' . rawurlencode($identity['sub']) . '/image', [
+			'headers' => ['Authorization' => 'Bearer ' . $identity['accessToken'], 'Accept' => 'image/png'],
+		]);
+		$status = $response->getStatusCode();
+		if ($status === 404) {
+			return null;
+		}
+		if ($status === 401 || $status === 403) {
+			throw new \RuntimeException('SecurySign rejected your session (HTTP ' . $status . '). Sign out and in again to reconnect.', 401);
+		}
+		if ($status !== 200) {
+			throw new \RuntimeException('SecurySign answered HTTP ' . $status . ' for the handwriting image. Please retry.', 503);
+		}
+		return (string)$response->getBody();
+	}
 
 	/**
 	 * Mirror the SecurySign card into the user's LibreSign signature elements so

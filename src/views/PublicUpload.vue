@@ -4,7 +4,7 @@
 -->
 
 <template>
-	<div class="pu" :class="{ 'pu--dark': theme === 'dark' }">
+	<div class="pu" :class="{ 'pu--dark': theme === 'dark', 'pu--fit': !document }">
 		<div class="pu__fold">
 			<PublicUploadHeader :theme="theme" @sign-in="gateToLogin" @toggle-theme="toggleTheme" />
 			<PublicUploadHero v-if="!document" @get-started="gateToLogin" />
@@ -145,13 +145,46 @@ function gateToLogin(): void {
 	color-scheme: dark;
 }
 
-// Header and hero fill the first screen, so the footer only appears on scroll.
-// Grid rather than flex: a 1fr row stretched to a min-height gets a definite
-// height, which the hero's device stage needs for its container query units.
+// Header and hero fill at least the first screen. Grid rather than flex: a 1fr
+// row stretched to a min-height gets a definite height, which the hero's device
+// stage needs for its container query units.
 .pu__fold {
 	display: grid;
 	grid-template-rows: auto 1fr;
 	min-height: 100svh;
+}
+
+// The landing is one screen on desktop, footer included, so it never scrolls.
+// The legal pages and phones still do. ponytail: below 560px tall nothing fits, so
+// the scrolling layout above takes over.
+@media (min-width: 861px) and (min-height: 560px) {
+	.pu--fit {
+		height: 100%;
+
+		.pu__fold {
+			flex: 1 1 auto;
+			min-height: 0;
+		}
+
+		.pu__eco {
+			gap: 20px;
+			padding-top: 24px;
+		}
+	}
+}
+
+// A short laptop screen keeps only the footer's links: the about line and
+// "Powered by" take about 110px the hero can't give up.
+@media (min-width: 861px) and (min-height: 560px) and (max-height: 800px) {
+	.pu--fit :deep(.pu__eco-main) {
+		display: none;
+	}
+
+	// Its divider would sit alone at the top of the footer.
+	.pu--fit :deep(.pu__eco-links) {
+		padding-top: 0;
+		border-top: none;
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {

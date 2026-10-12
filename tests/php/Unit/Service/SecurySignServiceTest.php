@@ -136,13 +136,49 @@ final class SecurySignServiceTest extends TestCase {
 	 * @param array<string, mixed> $certificate
 	 * @param array<string, mixed>|null $signature
 	 */
-	private function readiness(array $certificate, ?array $signature): bool {
+	private function readiness(array $certificate, ?array $signature, ?string $handwriting = null): bool {
+		return $this->readinessOf($certificate, $signature, $handwriting) !== null;
+	}
+
+	/**
+	 * @param array<string, mixed> $certificate
+	 * @param array<string, mixed>|null $signature
+	 */
+	private function readinessOf(array $certificate, ?array $signature, ?string $handwriting): ?array {
 		$service = $this->getMockBuilder(SecurySignService::class)
-			->disableOriginalConstructor()->onlyMethods(['request'])->getMock();
+			->disableOriginalConstructor()->onlyMethods(['request', 'handwriting'])->getMock();
 		$service->method('request')->willReturnCallback(
 			static fn (string $path) => str_starts_with($path, 'pki/') ? $certificate : $signature,
 		);
-		return $service->readiness(self::IDENTITY) !== null;
+		$service->method('handwriting')->willReturn($handwriting);
+		return $service->readiness(self::IDENTITY);
+	}
+
+	/**
+	 * SecurySign's signature row carries its assembled card (handwriting, name,
+	 * certificate details, QR code). Drawn inside GoPaperless's own signing card,
+	 * that stamped a card within a card, so the handwriting-only image is used.
+	 */
+	public function testTheHandwritingAloneIsImportedNotSecurySignsCard(): void {
+		$pem = self::selfSignedPem();
+		$certificate = ['status' => 'active', 'credentialId' => 'cred-1', 'certificate' => ['certificateId' => 7, 'certificatePem' => $pem]];
+		$card = ['certificateId' => 7, 'imagePngBase64' => base64_encode(self::PNG_MAGIC . 'card')];
+
+		self::assertSame(base64_encode(self::PNG_MAGIC . 'scribble'), $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'scribble')['imagePngBase64']);
+		// A SecurySign without the handwriting route still yields its card.
+		self::assertSame($card['imagePngBase64'], $this->readinessOf($certificate, $card, null)['imagePngBase64']);
+	}
+
+	public function testTheHandwritingRouteIsReadWithTheUsersToken(): void {
+		self::$gets = 0;
+		self::assertSame(self::PNG_MAGIC . 'scribble', self::serviceAnswering(200, self::PNG_MAGIC . 'scribble')->handwriting(self::IDENTITY));
+		self::assertNull(self::serviceAnswering(404)->handwriting(self::IDENTITY));
+		try {
+			self::serviceAnswering(403)->handwriting(self::IDENTITY);
+			self::fail('HTTP 403 accepted');
+		} catch (\RuntimeException $e) {
+			self::assertSame(401, $e->getCode());
+		}
 	}
 
 	private static function selfSignedPem(): string {
@@ -355,7 +391,7 @@ final class SecurySignServiceTest extends TestCase {
 				$this->createMock(IServerContainer::class),
 				$this->createMock(IClientService::class),
 				$this->createMock(LoggerInterface::class),
-			])->onlyMethods(['identity', 'request'])->getMock();
+			])->onlyMethods(['identity', 'request', 'handwriting'])->getMock();
 		$service->method('identity')->willReturn([
 			'sub' => 'google-oauth2|1',
 			'issuer' => 'https://idp.test/realms/signa',
@@ -364,6 +400,7 @@ final class SecurySignServiceTest extends TestCase {
 		$service->method('request')->willReturnCallback(static fn (string $path) => $path === 'pki/certificates/me'
 			? ['status' => 'active', 'credentialId' => 'c1', 'certificate' => ['certificateId' => 7, 'certificatePem' => $pem]]
 			: ['certificateId' => 7, 'imagePngBase64' => $png]);
+		$service->method('handwriting')->willReturn(null);
 
 		$readiness = $service->readiness();
 

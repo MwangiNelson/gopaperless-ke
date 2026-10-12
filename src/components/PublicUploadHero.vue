@@ -241,6 +241,21 @@ defineEmits<{
 	mask-image: linear-gradient(to bottom, #000 91%, transparent);
 }
 
+// Tighter spacing on a short laptop screen, so the landing still fits one screen.
+@media (min-width: 861px) and (max-height: 800px) {
+	.pu__intro {
+		padding-block: 12px;
+	}
+
+	.pu__title {
+		margin-bottom: 12px;
+	}
+
+	.pu__lede {
+		margin-bottom: 20px;
+	}
+}
+
 @media (max-width: 860px) {
 	// Grid, so the stage row has a definite height for 91cqh below. As a flex
 	// column item its height only came from growing, and cqh resolved to 0.

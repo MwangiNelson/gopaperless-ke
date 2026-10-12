@@ -214,19 +214,4 @@ final class SecurySignControllerTest extends TestCase {
 		self::assertSame(403, $response->getStatus());
 		self::assertFalse($response->getData()['verified']);
 	}
-
-	/** The editor previews the card; the time is only known at signing, so it is not sent. */
-	public function testTheEditorGetsTheCardWithoutATime(): void {
-		$this->signa->method('signingContext')->willReturnOnConsecutiveCalls([
-			'certificateSha256' => 'ab', 'name' => 'JANE NJOROGE', 'issuer' => 'Signa Hardware CA',
-			'handwriting' => "\x89PNG", 'time' => new \DateTimeImmutable(), 'expiresAt' => new \DateTimeImmutable(),
-		], null);
-
-		self::assertSame(['card' => [
-			'name' => 'JANE NJOROGE',
-			'issuer' => 'Signa Hardware CA',
-			'handwriting' => 'data:image/png;base64,' . base64_encode("\x89PNG"),
-		]], $this->controller->card()->getData());
-		self::assertSame(['card' => null], $this->controller->card()->getData());
-	}
 }

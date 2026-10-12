@@ -95,7 +95,19 @@ final class SecurySignMiddlewareTest extends TestCase {
 		$this->signa->expects(self::never())->method('isReady');
 		$page = $this->page();
 
+		$this->middleware->beforeController($this->createMock(PageController::class), 'legal');
 		self::assertSame($page, $this->middleware->afterController($this->createMock(PageController::class), 'legal', $page));
+	}
+
+	/**
+	 * The import that replaces the user's signature runs before the page lists
+	 * their signatures, so the page never offers the one it deleted.
+	 */
+	public function testThePageAsksBeforeItListsTheSignatures(): void {
+		$this->signa->method('applies')->willReturn(true);
+		$this->signa->expects(self::once())->method('isReady')->willThrowException(new \RuntimeException('upstream said no', 401));
+
+		$this->middleware->beforeController($this->createMock(PageController::class), 'index');
 	}
 
 	public function testAnOutageGoesUnnoticedOnAPageLoad(): void {

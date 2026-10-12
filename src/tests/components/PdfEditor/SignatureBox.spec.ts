@@ -4,7 +4,6 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
 import { createL10nMock, interpolateL10n } from '../../testHelpers/l10n.js'
 import { mount } from '@vue/test-utils'
 import type { SignerSummaryRecord } from '../../../types/index'
@@ -40,15 +39,6 @@ vi.mock('@nextcloud/vue/functions/usernameToColor', () => ({
 	usernameToColor: (seed: string) => usernameToColorMock(seed),
 }))
 
-const signingCardMock = vi.fn(() => Promise.resolve({
-	name: 'Jane Wanjiku Njoroge',
-	issuer: 'Signa Hardware CA',
-	handwriting: 'data:image/png;base64,AAAA',
-}))
-vi.mock('../../../services/signingCard', () => ({
-	signingCard: () => signingCardMock(),
-}))
-
 describe('SignatureBox.vue', () => {
 	it('computes the aria label from the label prop', () => {
 		const wrapper = mount(SignatureBox, {
@@ -69,8 +59,8 @@ describe('SignatureBox.vue', () => {
 		})
 
 		expect(usernameToColorMock).toHaveBeenCalledWith('Grace Hopper')
-		// No border around the signature: the position is a light tint.
 		expect(wrapper.vm.boxStyle).toEqual({
+			borderColor: 'rgb(10, 20, 30)',
 			backgroundColor: 'rgba(10, 20, 30, 0.12)',
 		})
 	})
@@ -79,35 +69,5 @@ describe('SignatureBox.vue', () => {
 		const wrapper = mount(SignatureBox)
 
 		expect(wrapper.vm.boxStyle).toEqual({})
-	})
-
-	it('previews another signer box as the signing card with placeholders', async () => {
-		const wrapper = mount(SignatureBox, {
-			props: {
-				label: 'Grace Hopper',
-				signer: createSigner({ displayName: 'Grace Hopper' }),
-			},
-		})
-		await flushPromises()
-
-		expect(signingCardMock).not.toHaveBeenCalled()
-		expect(wrapper.find('.signing-card__name').text()).toBe('GRACE HOPPER')
-		expect(wrapper.find('.signing-card__issuer').text()).toBe('ISSUER: CERTIFICATE ISSUER')
-		expect(wrapper.find('.signing-card__time').text()).toBe('TIMESTAMP: set when signed (EAT)')
-		expect(wrapper.find('img').exists()).toBe(false)
-	})
-
-	it('previews the signed-in user box with their handwriting, verified name and issuer', async () => {
-		const wrapper = mount(SignatureBox, {
-			props: {
-				label: 'Jane',
-				signer: { ...createSigner({ displayName: 'Jane' }), me: true } as SignerSummaryRecord,
-			},
-		})
-		await flushPromises()
-
-		expect(wrapper.find('.signing-card__name').text()).toBe('JANE WANJIKU NJOROGE')
-		expect(wrapper.find('.signing-card__issuer').text()).toBe('ISSUER: SIGNA HARDWARE CA')
-		expect(wrapper.find('img').attributes('src')).toBe('data:image/png;base64,AAAA')
 	})
 })

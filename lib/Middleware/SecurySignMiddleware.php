@@ -47,6 +47,19 @@ class SecurySignMiddleware extends Middleware {
 			return;
 		}
 
+		// A session's first readiness answer imports the SecurySign signature and
+		// deletes the one it replaces. Asked after the page controller, the page had
+		// already shipped the deleted one, and signing with it failed with "Field
+		// <id> does not belong to user". afterController reuses this answer from
+		// the session, and handles a failure itself.
+		if ($controller instanceof PageController && $methodName !== 'legal') {
+			try {
+				$this->signa->isReady();
+			} catch (\Throwable) {
+			}
+			return;
+		}
+
 		// SecurySign owns the visible signature. Refusing the three endpoints that
 		// change one is what makes that real: hiding a button in the Vue leaves the
 		// API able to replace the card that goes on a document. Reads are

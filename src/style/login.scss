@@ -234,10 +234,6 @@
 		&:focus-visible {
 			background: #00b34a;
 		}
-
-		.button-vue__wrapper::before {
-			mask-image: var(--gp-mimi-mark);
-		}
 	}
 }
 

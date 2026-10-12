@@ -8,7 +8,7 @@
 		:style="boxStyle"
 		role="img"
 		:aria-label="signatureBoxAriaLabel">
-		<SigningCardPreview :name="label" :mine="!!signer && 'me' in signer && !!signer.me" />
+		<span class="label" :class="{ 'label--chip': !!palette }" :style="labelStyle" aria-hidden="true">{{ label }}</span>
 	</div>
 </template>
 
@@ -16,8 +16,6 @@
 import { t } from '@nextcloud/l10n'
 import { usernameToColor } from '@nextcloud/vue/functions/usernameToColor'
 import { computed } from 'vue'
-
-import SigningCardPreview from '../../PdfEditor/SigningCardPreview.vue'
 import type { SignerDetailRecord, SignerSummaryRecord } from '../../../types/index'
 
 defineOptions({
@@ -86,8 +84,10 @@ const boxStyle = computed(() => {
 	const style: Record<string, string> = {}
 
 	if (props.palette) {
+		style.borderColor = props.palette.base
 		style.backgroundColor = props.palette.tint
 	} else if (legacyColor.value) {
+		style.borderColor = legacyColor.value.border
 		style.backgroundColor = legacyColor.value.fill
 	}
 
@@ -120,13 +120,13 @@ defineExpose({
 <style lang="scss" scoped>
 .signature-box {
 	box-sizing: border-box;
-	border: 2px solid transparent;
+	border: 2px dashed #2563eb;
 	background: rgba(37, 99, 235, 0.08);
 	color: var(--color-text-maxcontrast);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 0;
+	padding: 6px 8px;
 	border-radius: 6px;
 	width: 100%;
 	height: 100%;

@@ -62,8 +62,6 @@ if (logo?.parentElement) {
 // local admin account.
 const loginProvider = loadState<number>('libresign', 'login_provider_id', 0)
 if (loginProvider > 0 && new URLSearchParams(window.location.search).get('direct') !== '1') {
-	body.classList.add('gp-one-login')
-
 	// Nextcloud renders the alternative logins after this script runs.
 	const markLogin = () => {
 		const path = `/apps/user_oidc/login/${loginProvider}`
@@ -72,6 +70,8 @@ if (loginProvider > 0 && new URLSearchParams(window.location.search).get('direct
 			return
 		}
 		button.classList.add('gp-login')
+		// Only now: an id that matches no button would otherwise hide every way in.
+		body.classList.add('gp-one-login')
 		const text = button.querySelector('.button-vue__text') ?? button
 		text.textContent = 'Log In'
 	}
