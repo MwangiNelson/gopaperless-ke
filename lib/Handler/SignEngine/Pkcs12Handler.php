@@ -516,9 +516,7 @@ class Pkcs12Handler extends SignEngineHandler {
 		$card = self::builtInCard(
 			$this->getVisibleElements(),
 			$this->getSignatureParams(),
-			// horizontal-top unless occ config:app:set libresign signing_card_layout
-			// says stacked or horizontal.
-			$this->appConfig->getValueString(Application::APP_ID, 'signing_card_layout', 'horizontal-top'),
+			$this->cardLayout(),
 			new \DateTimeImmutable(),
 		);
 		// Only the PHP engine draws the card, so a card signs there whatever
@@ -545,6 +543,14 @@ class Pkcs12Handler extends SignEngineHandler {
 		}
 		$this->getInputFile()->putContent($signedContent);
 		return $this->getInputFile();
+	}
+
+	/**
+	 * The card layout for every engine that draws one: horizontal-top unless
+	 * occ config:app:set libresign signing_card_layout says stacked or horizontal.
+	 */
+	protected function cardLayout(): string {
+		return $this->appConfig->getValueString(Application::APP_ID, 'signing_card_layout', 'horizontal-top');
 	}
 
 	/**

@@ -18,6 +18,7 @@ use OCA\Libresign\Service\FooterService;
 use OCA\Libresign\Service\IdentifyMethodService;
 use OCA\Libresign\Service\Payment\MnoRoutingRegistry;
 use OCA\Libresign\Service\Payment\PhoneOverrideAdminService;
+use OCA\Libresign\Service\SecurySignService;
 use OCA\Libresign\Service\SignatureBackgroundService;
 use OCA\Libresign\Service\SignatureProfile\SignatureProfileService;
 use OCA\Libresign\Service\SignatureTextService;
@@ -166,10 +167,18 @@ class Admin implements ISettings {
 		//	Only whether a signing secret is stored reaches the page, never the secret.
 		$this->initialState->provideInitialState('securysign_provider_id', $this->appConfig->getValueInt(Application::APP_ID, 'securysign_provider_id', 0));
 		$this->initialState->provideInitialState('securysign_url', $this->appConfig->getValueString(Application::APP_ID, 'securysign_url', ''));
-		$this->initialState->provideInitialState('tendaworld_url', $this->appConfig->getValueString(Application::APP_ID, 'tendaworld_url', ''));
+		$addresses = SecurySignService::splitAddresses(
+			$this->appConfig->getValueString(Application::APP_ID, 'tendaworld_url', ''),
+			$this->appConfig->getValueString(Application::APP_ID, 'mimi_url', ''),
+		);
+		$this->initialState->provideInitialState('tendaworld_url', $addresses['website']);
+		$this->initialState->provideInitialState('mimi_url', $addresses['mimi']);
 		$this->initialState->provideInitialState('securysign_signing_secret_set', $this->appConfig->getValueString(Application::APP_ID, 'securysign_signing_secret', '') !== '');
+		$this->initialState->provideInitialState('securysign_signing_enabled', $this->appConfig->getValueBool(Application::APP_ID, 'securysign_signing_enabled', true));
 		$this->initialState->provideInitialState('mimi_client_secret_set', $this->appConfig->getValueString(Application::APP_ID, 'mimi_client_secret', '') !== '');
 		$this->initialState->provideInitialState('mimi_client_id', $this->appConfig->getValueString(Application::APP_ID, 'mimi_client_id', ''));
+		$this->initialState->provideInitialState('mimi_passkey_enabled', $this->appConfig->getValueBool(Application::APP_ID, 'mimi_passkey_enabled', true));
+		$this->initialState->provideInitialState('enrolment_site', $this->appConfig->getValueString(Application::APP_ID, 'enrolment_site', 'tendaworld'));
 
 		//	SMS & TIARA API CONFIG
 		$this->initialState->provideInitialState('sms_otp_enabled', $this->appConfig->getValueBool(Application::APP_ID, 'sms_otp_enabled', false));

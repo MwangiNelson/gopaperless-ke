@@ -161,7 +161,7 @@ class SecurySignHandler extends Pkcs12Handler {
 	 * sign and it is still fresh. Anything else signs with the usual appearance:
 	 * a card naming another certificate would put the wrong name on the page.
 	 *
-	 * @return array{name: string, issuer: string, time: \DateTimeImmutable, handwriting: string}|null
+	 * @return array{name: string, issuer: string, time: \DateTimeImmutable, handwriting: string, layout: string}|null
 	 */
 	private function signingCard(string $pem): ?array {
 		$logger = \OCP\Server::get(LoggerInterface::class);
@@ -181,7 +181,8 @@ class SecurySignHandler extends Pkcs12Handler {
 		}
 		$path = \OCP\Server::get(ITempManager::class)->getTemporaryFile('.png');
 		file_put_contents($path, $context['handwriting']);
-		return ['name' => $context['name'], 'issuer' => $context['issuer'], 'time' => $context['time'], 'handwriting' => $path];
+		return ['name' => $context['name'], 'issuer' => $context['issuer'], 'time' => $context['time'], 'handwriting' => $path,
+			'layout' => $this->cardLayout()];
 	}
 
 	private function finalize(string $signature): string {

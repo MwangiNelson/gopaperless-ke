@@ -36,7 +36,10 @@ final class SecurySignControllerTest extends TestCase {
 		$this->signa = $this->createMock(SecurySignService::class);
 		$this->signa->method('applies')->willReturn(true);
 		$this->signa->method('identity')->willReturn(self::IDENTITY);
-		$this->signa->method('onboardingUrl')->willReturn('https://tendaworld.test/onboarding/gopaperless');
+		$this->signa->method('enrolmentUrl')->willReturnCallback(
+			static fn (string $state, string $sub, string $email, string $returnUrl): string => 'https://tendaworld.test/onboarding/gopaperless?'
+				. http_build_query(['state' => $state, 'subject' => $sub, 'returnTo' => $returnUrl]),
+		);
 
 		$this->store = [];
 		$this->session = $this->createMock(ISession::class);
@@ -67,6 +70,8 @@ final class SecurySignControllerTest extends TestCase {
 		parse_str((string)parse_url($response->getRedirectURL(), PHP_URL_QUERY), $query);
 		self::assertSame(self::IDENTITY['sub'], $query['subject']);
 		self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $query['state']);
+		// Whichever site enrols the user, it sends them back to our return route with this state.
+		self::assertSame('https://gopaperless.test/apps/libresign/securysign/return?state=' . $query['state'], $query['returnTo']);
 		return $query['state'];
 	}
 

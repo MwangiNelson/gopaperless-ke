@@ -142,9 +142,13 @@ export type AdminInitialState = {
 	securysign_provider_id: number
 	securysign_url: string
 	tendaworld_url: string
+	mimi_url: string
 	securysign_signing_secret_set: boolean
+	securysign_signing_enabled: boolean
 	mimi_client_secret_set: boolean
 	mimi_client_id: string
+	mimi_passkey_enabled: boolean
+	enrolment_site: 'tendaworld' | 'mimi'
 	phone_mno_routing_v2_enabled: boolean
 }
 

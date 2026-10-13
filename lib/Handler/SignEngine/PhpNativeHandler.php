@@ -176,9 +176,11 @@ class PhpNativeHandler extends Pkcs12Handler {
 	): SignatureAppearanceDto {
 		$rect = [$llx, $pageHeight - $ury, $urx, $pageHeight - $lly];
 		if ($this->signingCard !== null) {
-			// The handwriting is the signature drawn for this box, or the
-			// imported one when the box carries no drawing.
-			$card = ($signatureImagePath !== '' ? ['handwriting' => $signatureImagePath] : []) + $this->signingCard;
+			// A SecurySign card brings its own visible signature scribble, which
+			// wins over the box's image: that image is the imported copy, and it
+			// is SecurySign's whole card while the scribble route refuses the
+			// client. The built-in card has none and draws the box's signature.
+			$card = $this->signingCard + ($signatureImagePath !== '' ? ['handwriting' => $signatureImagePath] : []);
 			[$xObject, $frame] = self::signingCardLayout($card, (float)$width, (float)$height);
 			return new SignatureAppearanceDto(
 				backgroundImagePath: null,

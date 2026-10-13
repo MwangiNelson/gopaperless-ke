@@ -11,8 +11,13 @@ namespace OCA\Libresign\Tests\Unit\Handler\SignEngine;
 
 use OCA\Libresign\DataObjects\VisibleElementAssoc;
 use OCA\Libresign\Db\FileElement;
+use OCA\Libresign\Handler\CertificateEngine\CertificateEngineFactory;
 use OCA\Libresign\Handler\SignEngine\PhpNativeHandler;
 use OCA\Libresign\Handler\SignEngine\Pkcs12Handler;
+use OCA\Libresign\Service\DocMdp\ConfigService as DocMdpConfigService;
+use OCA\Libresign\Service\SignatureBackgroundService;
+use OCA\Libresign\Service\SignatureTextService;
+use OCP\IAppConfig;
 use PHPUnit\Framework\TestCase;
 
 final class SigningCardLayoutTest extends TestCase {
@@ -149,6 +154,28 @@ final class SigningCardLayoutTest extends TestCase {
 			Pkcs12Handler::builtInCard($box, $params, 'horizontal-top', $time),
 		);
 		self::assertSame('jane@example.com', Pkcs12Handler::builtInCard($box, ['SignerName' => ' '] + $params, 'stacked', $time)['name']);
+	}
+
+	/** SecurySign's scribble beats the box's imported image; the built-in card draws the box's own. */
+	public function testTheCardsOwnScribbleWinsOverTheBoxImage(): void {
+		$boxImage = tempnam(sys_get_temp_dir(), 'box') . '.png';
+		copy($this->handwriting, $boxImage);
+		$handler = new PhpNativeHandler(
+			$this->createMock(IAppConfig::class),
+			$this->createMock(DocMdpConfigService::class),
+			$this->createMock(SignatureTextService::class),
+			$this->createMock(SignatureBackgroundService::class),
+			$this->createMock(CertificateEngineFactory::class),
+		);
+		$draw = static fn (array $card): string => (new \ReflectionMethod($handler, 'buildAppearanceForElement'))
+			->invoke($handler->setSigningCard($card), 10.0, 20.0, 210.0, 80.0, 800.0, 0, 200, 60, $boxImage)
+			->signatureImagePath;
+		$builtIn = $this->card('Jane Njoroge');
+		unset($builtIn['handwriting']);
+
+		self::assertSame($this->handwriting, $draw($this->card('Jane Njoroge')), 'SecurySign card');
+		self::assertSame($boxImage, $draw($builtIn), 'built-in card');
+		unlink($boxImage);
 	}
 
 	public function testTheBuiltInCardStepsAsideWhenItHasNothingToDraw(): void {

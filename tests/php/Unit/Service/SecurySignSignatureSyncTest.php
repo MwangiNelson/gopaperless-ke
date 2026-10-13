@@ -32,7 +32,7 @@ use Psr\Log\LoggerInterface;
  * than leave two.
  */
 final class SecurySignSignatureSyncTest extends TestCase {
-	private const CARD = ['certificateId' => '7', 'imagePngBase64' => 'cGluZw==',
+	private const CARD = ['certificateId' => '7', 'imagePngBase64' => 'cGluZw==', 'card' => SecurySignService::CARD_VERSION,
 		'issuer' => 'Test CA', 'serial' => 'AA BB', 'validFrom' => '1 Jan 2026', 'validUntil' => '1 Jan 2027'];
 
 	private UserElementMapper&MockObject $mapper;
@@ -126,6 +126,26 @@ final class SecurySignSignatureSyncTest extends TestCase {
 
 		self::assertSame([1], $deleted, 'only the card from the superseded certificate goes');
 		self::assertSame('7', ($fresh->getMetadata() ?? [])['securysign_certificate_id']);
+	}
+
+	public function testAFallbackCardNeverReplacesHandwriting(): void {
+		$this->mapper->method('findMany')->willReturn([$this->element(1, '7')]);
+		$this->accounts->expects(self::never())->method('saveVisibleElement');
+
+		$this->service->syncVisibleSignature(['card' => 3] + self::CARD);
+	}
+
+	public function testHandwritingReplacesAFallbackCard(): void {
+		$fallback = $this->element(1, '7');
+		$fallback->setMetadata(['securysign_certificate_id' => '7', 'securysign_card' => 3]);
+		$fresh = $this->element(2, null);
+		$this->mapper->method('findMany')->willReturnOnConsecutiveCalls([$fallback], [$fallback, $fresh]);
+		$this->accounts->expects(self::once())->method('saveVisibleElement');
+		$this->mapper->expects(self::once())->method('delete')->with($fallback);
+
+		$this->service->syncVisibleSignature(self::CARD);
+
+		self::assertSame(SecurySignService::CARD_VERSION, ($fresh->getMetadata() ?? [])['securysign_card']);
 	}
 
 	public function testAFailedMirrorDoesNotLockTheUserOut(): void {

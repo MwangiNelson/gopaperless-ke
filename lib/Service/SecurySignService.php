@@ -24,10 +24,15 @@ class SecurySignService {
 	private const DOWN_KEY = 'libresign.securysign.down_until';
 	private const DOWN_SECONDS = 60;
 	/**
-	 * Bump to re-import every mirrored signature. 3 dropped the composed card;
-	 * 4 takes the handwriting alone instead of SecurySign's assembled card.
+	 * What a mirrored signature is, best first. A lower one is replaced once a
+	 * higher one is available, never the other way round.
+	 * 5: the visible signature scribble from SecurySign's signing context.
+	 * 4: what SecurySign's image route gave, which can be the whole card.
+	 * 3: SecurySign's card, imported while neither gives the scribble.
 	 */
-	public const CARD_VERSION = 4;
+	public const CARD_VERSION = 5;
+	private const IMAGE_ROUTE_VERSION = 4;
+	private const CARD_FALLBACK_VERSION = 3;
 
 	public function __construct(
 		private IAppConfig $config,
@@ -111,10 +116,12 @@ class SecurySignService {
 
 	/**
 	 * Whether this user's documents are signed by SecurySign. Everyone else, and
-	 * every instance without the RP's signing secret, keeps LibreSign's own engine.
+	 * every instance with the switch off or without the RP's signing secret,
+	 * keeps LibreSign's own engine.
 	 */
 	public function signs(): bool {
 		return $this->applies()
+			&& $this->config->getValueBool(Application::APP_ID, 'securysign_signing_enabled', true)
 			&& $this->config->getValueString(Application::APP_ID, 'securysign_signing_secret') !== '';
 	}
 
@@ -257,7 +264,7 @@ class SecurySignService {
 	 */
 	public function isReady(bool $forceRefresh = false): bool {
 		$identity = $this->identity();
-		$cacheKey = hash('sha256', $identity['issuer'] . "\0" . $identity['sub']);
+		$cacheKey = self::cacheKey($identity);
 		$cached = $this->session->get(self::READINESS_CACHE_KEY);
 		if (!$forceRefresh && is_array($cached)
 			&& ($cached['identity'] ?? null) === $cacheKey
@@ -266,7 +273,7 @@ class SecurySignService {
 		}
 
 		$readiness = $this->readiness($identity);
-		$this->cacheReadiness($cacheKey, $readiness !== null);
+		$this->cacheReadiness($cacheKey, $readiness);
 		if ($readiness !== null) {
 			$this->syncVisibleSignature($readiness);
 		}
@@ -279,7 +286,7 @@ class SecurySignService {
 	 * gate on readiness and mirror the signature without asking twice.
 	 *
 	 * @param array{sub: string, issuer: string, accessToken: string}|null $identity
-	 * @return array{certificateId: string, imagePngBase64: string, issuer: string, serial: string, validFrom: string, validUntil: string}|null
+	 * @return array{certificateId: string, imagePngBase64: string, card: int, issuer: string, serial: string, validFrom: string, validUntil: string}|null
 	 */
 	public function readiness(?array $identity = null): ?array {
 		$identity ??= $this->identity();
@@ -306,15 +313,24 @@ class SecurySignService {
 			return null;
 		}
 		// The row says which certificate the signature belongs to. Its image is
-		// SecurySign's assembled card, and the built-in signing card would draw
-		// that card inside itself, so the handwriting comes from its own route.
-		$image = $this->handwriting($identity) ?? base64_decode($signature['imagePngBase64'] ?? '', true);
+		// SecurySign's assembled card, which the signing card would draw inside
+		// itself. The scribble alone comes first from the signing context, the
+		// source the signed PDF uses, then from the image route, which has been
+		// seen answering with the whole card.
+		$scribble = $this->contextScribble((string)$leaf['certificatePem']);
+		$version = self::CARD_VERSION;
+		if ($scribble === null) {
+			$scribble = $this->handwriting($identity);
+			$version = self::IMAGE_ROUTE_VERSION;
+		}
+		$image = $scribble ?? base64_decode($signature['imagePngBase64'] ?? '', true);
 		if (!is_string($image) || !str_starts_with($image, "\x89PNG\r\n\x1a\n")) {
 			throw new \RuntimeException('SecurySign returned an invalid visible signature.', 503);
 		}
 		return [
 			'certificateId' => (string)$leaf['certificateId'],
 			'imagePngBase64' => base64_encode($image),
+			'card' => $scribble === null ? self::CARD_FALLBACK_VERSION : $version,
 			'issuer' => (string)($leaf['issuer'] ?? 'SecurySign'),
 			'serial' => (string)($leaf['serialNumberHex'] ?? ''),
 			'validFrom' => self::day($leaf['validFrom'] ?? null),
@@ -322,12 +338,34 @@ class SecurySignService {
 		];
 	}
 
+	/**
+	 * The visible signature scribble from SecurySign's signing context, when the
+	 * context is for this certificate. Null when SecurySign has none to give,
+	 * and the import tries the image route instead.
+	 */
+	private function contextScribble(string $pem): ?string {
+		try {
+			$context = $this->signingContext();
+		} catch (\Throwable $e) {
+			$this->logger->info('No SecurySign signing context for the signature import', ['exception' => $e]);
+			return null;
+		}
+		return $context !== null && hash_equals((string)openssl_x509_fingerprint($pem, 'sha256'), $context['certificateSha256'])
+			? $context['handwriting']
+			: null;
+	}
+
 
 	/**
 	 * The user's handwriting alone, as SecurySign serves it for an RP to place
-	 * in its own documents: no name, certificate details or QR code. Null where
-	 * a SecurySign deployment has no such route (404), and readiness falls back
-	 * to the card.
+	 * in its own documents: no name, certificate details or QR code. Null when
+	 * the route gives no PNG, and readiness falls back to the card.
+	 *
+	 * Never a reason to end the session. The two calls before it already proved
+	 * the token, and this route alone also compares the URL's sub with the one
+	 * SecurySign resolves from the access token. A client without Keycloak's
+	 * `basic` scope mints access tokens with no sub, SecurySign falls back to
+	 * the username, and the route answers 403 to a valid login.
 	 *
 	 * @param array{sub: string, issuer: string, accessToken: string} $identity
 	 */
@@ -337,16 +375,17 @@ class SecurySignService {
 			'headers' => ['Authorization' => 'Bearer ' . $identity['accessToken'], 'Accept' => 'image/png'],
 		]);
 		$status = $response->getStatusCode();
-		if ($status === 404) {
-			return null;
+		$body = (string)$response->getBody();
+		if ($status === 200 && str_starts_with($body, "\x89PNG\r\n\x1a\n")) {
+			return $body;
 		}
-		if ($status === 401 || $status === 403) {
-			throw new \RuntimeException('SecurySign rejected your session (HTTP ' . $status . '). Sign out and in again to reconnect.', 401);
+		if ($status !== 404) {
+			$this->logger->warning('SecurySign gave no visible signature scribble; importing its card instead', [
+				'status' => $status,
+				'tokenClaims' => self::claimNames($identity['accessToken']),
+			]);
 		}
-		if ($status !== 200) {
-			throw new \RuntimeException('SecurySign answered HTTP ' . $status . ' for the handwriting image. Please retry.', 503);
-		}
-		return (string)$response->getBody();
+		return null;
 	}
 
 	/**
@@ -361,7 +400,7 @@ class SecurySignService {
 	 * the card is already verified, and failing to cache it locally is no reason
 	 * to lock someone out of the app.
 	 *
-	 * @param array{certificateId: string, imagePngBase64: string} $readiness
+	 * @param array{certificateId: string, imagePngBase64: string, card: int} $readiness
 	 */
 	public function syncVisibleSignature(array $readiness): void {
 		$user = $this->users->getUser();
@@ -375,11 +414,13 @@ class SecurySignService {
 			$existing = $mapper->findMany(['user_id' => $user->getUID(), 'type' => 'signature']);
 			// Both the certificate and the card layout have to match. Without the
 			// version, changing the card design would leave every existing user on
-			// the old image forever, because their certificate had not changed.
+			// the old image forever, because their certificate had not changed. A
+			// fallback card gives way to the handwriting once the route answers,
+			// and never replaces handwriting already imported.
 			foreach ($existing as $element) {
 				$metadata = $element->getMetadata() ?? [];
 				if (($metadata['securysign_certificate_id'] ?? null) === $readiness['certificateId']
-					&& ($metadata['securysign_card'] ?? null) === self::CARD_VERSION) {
+					&& ($metadata['securysign_card'] ?? 0) >= $readiness['card']) {
 					return;
 				}
 			}
@@ -404,7 +445,7 @@ class SecurySignService {
 				}
 				$element->setMetadata(($element->getMetadata() ?? []) + [
 					'securysign_certificate_id' => $readiness['certificateId'],
-					'securysign_card' => self::CARD_VERSION,
+					'securysign_card' => $readiness['card'],
 				]);
 				$mapper->update($element);
 			}
@@ -422,11 +463,54 @@ class SecurySignService {
 		$this->session->remove(self::READINESS_CACHE_KEY);
 	}
 
-	private function cacheReadiness(string $identity, bool $ready): void {
+	/** @param array{sub: string, issuer: string} $identity */
+	private static function cacheKey(array $identity): string {
+		return hash('sha256', $identity['issuer'] . "\0" . $identity['sub']);
+	}
+
+	private function cacheReadiness(string $identity, ?array $readiness): void {
 		$this->session->set(self::READINESS_CACHE_KEY, [
 			'identity' => $identity,
-			'ready' => $ready,
+			'ready' => $readiness !== null,
+			// Kept for the account page, so showing it costs no request.
+			'certificate' => $readiness === null ? null : [
+				'issuer' => $readiness['issuer'],
+				'serial' => $readiness['serial'],
+				'validUntil' => $readiness['validUntil'],
+			],
 		]);
+	}
+
+	/**
+	 * The user's certificate page on the TendaWorld website. A visitor who is
+	 * not signed in there is signed in from their live SecurySign session,
+	 * which both sites share, and lands on the page with nothing to click.
+	 */
+	public function profileUrl(): string {
+		return $this->websiteOrigin() . '/profile';
+	}
+
+	/**
+	 * The certificate SecurySign signs this user's documents with, for the
+	 * account page: issuer, serial and expiry, from the readiness answer the
+	 * session already holds. A session from before they were kept asks once.
+	 * Null when SecurySign can't say right now.
+	 *
+	 * @return array{issuer: string, serial: string, validUntil: string}|null
+	 */
+	public function signingCertificate(): ?array {
+		try {
+			$cached = $this->session->get(self::READINESS_CACHE_KEY);
+			if (!is_array($cached) || ($cached['identity'] ?? null) !== self::cacheKey($this->identity())
+				|| !array_key_exists('certificate', $cached)) {
+				$this->isReady(true);
+				$cached = $this->session->get(self::READINESS_CACHE_KEY);
+			}
+			return is_array($cached['certificate'] ?? null) ? $cached['certificate'] : null;
+		} catch (\Throwable $e) {
+			$this->logger->info('No SecurySign certificate details for the account page', ['exception' => $e]);
+			return null;
+		}
 	}
 
 	/**
@@ -460,23 +544,53 @@ class SecurySignService {
 	}
 
 	/**
-	 * Where a user without a usable certificate is sent.
-	 *
-	 * Read from `occ config:app:set libresign tendaworld_url` first, then from
-	 * the system value, which Nextcloud also fills from an `NC_tendaworld_url`
-	 * environment variable. A deployment that only sets env therefore needs no
-	 * occ run, and one that ran occ is not overridden by the image's env.
+	 * Where a user without a usable certificate gets one, and how they come
+	 * back: the TendaWorld website by default, or MIMI when the admin picks it.
+	 * Either way they return to $returnUrl, which checks $state.
 	 */
-	public function onboardingUrl(): string {
-		$configured = $this->config->getValueString(Application::APP_ID, 'tendaworld_url')
-			?: $this->systemConfig->getSystemValueString('tendaworld_url', 'https://tendaworld.com');
-		return self::origin($configured) . '/onboarding/gopaperless';
+	public function enrolmentUrl(string $state, string $sub, string $email, string $returnUrl): string {
+		if ($this->config->getValueString(Application::APP_ID, 'enrolment_site', 'tendaworld') === 'mimi') {
+			// MIMI sets up this account (it switches if signed in as another one,
+			// asking for this email), then sends the user to our return route.
+			return $this->mimiOrigin() . '/enrol?' . http_build_query(['sub' => $sub, 'email' => $email, 'returnTo' => $returnUrl]);
+		}
+		return $this->websiteOrigin() . '/onboarding/gopaperless?' . http_build_query(['state' => $state, 'subject' => $sub]);
+	}
+
+	/**
+	 * The TendaWorld website's and MIMI's addresses as configured, empty for the
+	 * default. Each reads `occ config:app:set libresign <key>` first, then the
+	 * system value, which an `NC_<key>` environment variable fills. A deployment
+	 * that only sets env needs no occ run, and env never overrides an admin.
+	 *
+	 * @return array{website: string, mimi: string}
+	 */
+	public function addresses(): array {
+		$read = fn (string $key): string => $this->config->getValueString(Application::APP_ID, $key)
+			?: $this->systemConfig->getSystemValueString($key, '');
+		return self::splitAddresses($read('tendaworld_url'), $read('mimi_url'));
+	}
+
+	/**
+	 * ponytail: tendaworld_url held MIMI's address as well until mimi_url
+	 * existed, so a MIMI address found there is MIMI's. Drop this once every
+	 * instance has saved the SecurySign settings since.
+	 *
+	 * @return array{website: string, mimi: string}
+	 */
+	public static function splitAddresses(string $website, string $mimi): array {
+		if (str_contains((string)parse_url($website, PHP_URL_HOST), 'mimi')) {
+			return ['website' => '', 'mimi' => $mimi ?: $website];
+		}
+		return ['website' => $website, 'mimi' => $mimi];
+	}
+
+	private function websiteOrigin(): string {
+		return self::origin($this->addresses()['website'] ?: 'https://tendaworld.com');
 	}
 
 	private function mimiOrigin(): string {
-		$configured = $this->config->getValueString(Application::APP_ID, 'tendaworld_url')
-			?: $this->systemConfig->getSystemValueString('tendaworld_url', 'https://gopaperless.mimi.ke');
-		return self::origin($configured);
+		return self::origin($this->addresses()['mimi'] ?: 'https://gopaperless.mimi.ke');
 	}
 
 	private const PASSKEY_KEY = 'libresign.mimi.passkey';
@@ -484,10 +598,11 @@ class SecurySignService {
 
 	/**
 	 * Whether this session still owes the MIMI passkey check that follows
-	 * sign-in. Off until the MIMI client secret is set.
+	 * sign-in. Off while the switch is off or the MIMI client secret is unset.
 	 */
 	public function passkeyPending(): bool {
 		return $this->applies()
+			&& $this->config->getValueBool(Application::APP_ID, 'mimi_passkey_enabled', true)
 			&& $this->config->getValueString(Application::APP_ID, 'mimi_client_secret') !== ''
 			&& $this->session->get(self::PASSKEY_KEY) === null;
 	}

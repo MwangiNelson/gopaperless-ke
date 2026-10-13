@@ -50,28 +50,89 @@ final class SecurySignServiceTest extends TestCase {
 		self::assertTrue($service->applies());
 	}
 
-	public function testTheOnboardingTargetComesFromOccOrTheSystemValue(): void {
-		$fromOcc = '';
+	private const RETURN_URL = 'https://gopaperless.test/apps/libresign/securysign/return?state=s1';
+
+	/** @param array<string, string> $values app config; anything else reads as its default */
+	private function serviceWithConfig(array &$values, ?IConfig $system = null): SecurySignService {
 		$appConfig = $this->createMock(IAppConfig::class);
-		$appConfig->method('getValueString')->willReturnCallback(static function () use (&$fromOcc) {
-			return $fromOcc;
-		});
+		$appConfig->method('getValueString')->willReturnCallback(
+			static function (string $app, string $key, string $default = '') use (&$values): string {
+				return $values[$key] ?? $default;
+			},
+		);
+		return new SecurySignService($appConfig, $system ?? $this->createMock(IConfig::class), $this->createMock(ISession::class), $this->createMock(IUserSession::class), $this->createMock(IServerContainer::class), $this->createMock(IClientService::class), $this->createMock(LoggerInterface::class));
+	}
+
+	public function testTheTendaWorldWebsiteEnrolsByDefaultFromOccOrTheSystemValue(): void {
+		$values = [];
 		$system = $this->createMock(IConfig::class);
-		$system->method('getSystemValueString')->willReturn('https://staging.tendaworld.com');
-		$service = new SecurySignService($appConfig, $system, $this->createMock(ISession::class), $this->createMock(IUserSession::class), $this->createMock(IServerContainer::class), $this->createMock(IClientService::class), $this->createMock(LoggerInterface::class));
+		$system->method('getSystemValueString')->willReturnCallback(
+			static fn (string $key, string $default = '') => $key === 'tendaworld_url' ? 'https://staging.tendaworld.com' : $default,
+		);
+		$service = $this->serviceWithConfig($values, $system);
 
 		// Nobody ran occ: the system value, which an NC_tendaworld_url env var fills.
-		self::assertSame('https://staging.tendaworld.com/onboarding/gopaperless', $service->onboardingUrl());
+		self::assertSame(
+			'https://staging.tendaworld.com/onboarding/gopaperless?state=s1&subject=sub-1',
+			$service->enrolmentUrl('s1', 'sub-1', 'jane@example.test', self::RETURN_URL),
+		);
 
 		// occ wins once it is set, so the image's env cannot override an admin.
-		$fromOcc = 'https://tendaworld.com';
-		self::assertSame('https://tendaworld.com/onboarding/gopaperless', $service->onboardingUrl());
+		$values['tendaworld_url'] = 'https://tendaworld.com';
+		self::assertStringStartsWith('https://tendaworld.com/onboarding/gopaperless?', $service->enrolmentUrl('s1', 'sub-1', '', self::RETURN_URL));
+	}
+
+	public function testMimiEnrolsWhenChosenAndSendsTheUserBackToOurReturnRoute(): void {
+		$values = ['enrolment_site' => 'mimi', 'mimi_url' => 'https://staging-gopaperless.mimi.ke'];
+		$url = $this->serviceWithConfig($values)->enrolmentUrl('s1', 'sub-1', 'jane@example.test', self::RETURN_URL);
+
+		self::assertSame('https://staging-gopaperless.mimi.ke/enrol', strtok($url, '?'));
+		parse_str((string)parse_url($url, PHP_URL_QUERY), $query);
+		self::assertSame(['sub' => 'sub-1', 'email' => 'jane@example.test', 'returnTo' => self::RETURN_URL], $query);
+	}
+
+	/** The website setting used to hold MIMI's address too. One left there is MIMI's, and enrolment still reaches the website. */
+	public function testAMimiAddressLeftInTheWebsiteSettingIsMimis(): void {
+		$values = ['tendaworld_url' => 'https://gopaperless.mimi.ke'];
+		$service = $this->serviceWithConfig($values);
+
+		self::assertSame('https://gopaperless.mimi.ke', $service->passkeyFrame()['origin']);
+		self::assertStringStartsWith('https://tendaworld.com/onboarding/gopaperless?', $service->enrolmentUrl('s1', 'sub-1', '', self::RETURN_URL));
+		self::assertSame(['website' => '', 'mimi' => 'https://other.mimi.ke'], SecurySignService::splitAddresses('https://gopaperless.mimi.ke', 'https://other.mimi.ke'));
+		self::assertSame(['website' => 'https://tendaworld.com', 'mimi' => ''], SecurySignService::splitAddresses('https://tendaworld.com', ''));
+	}
+
+	public function testSigningAndThePasskeyCheckEachFollowTheirSwitch(): void {
+		$switches = [];
+		$appConfig = $this->createMock(IAppConfig::class);
+		$appConfig->method('getValueInt')->willReturn(1);
+		$appConfig->method('getValueString')->willReturn('secret');
+		$appConfig->method('getValueBool')->willReturnCallback(
+			static function (string $app, string $key, bool $default = false) use (&$switches): bool {
+				return $switches[$key] ?? $default;
+			},
+		);
+		$session = $this->createMock(ISession::class);
+		$session->method('get')->willReturnCallback(static fn (string $key) => $key === 'oidc.providerid' ? 1 : null);
+		$users = $this->createMock(IUserSession::class);
+		$users->method('isLoggedIn')->willReturn(true);
+		$service = new SecurySignService($appConfig, $this->createMock(IConfig::class), $session, $users, $this->createMock(IServerContainer::class), $this->createMock(IClientService::class), $this->createMock(LoggerInterface::class));
+
+		self::assertTrue($service->signs(), 'a switch never saved counts as on');
+		self::assertTrue($service->passkeyPending());
+
+		$switches['securysign_signing_enabled'] = false;
+		self::assertFalse($service->signs());
+		self::assertTrue($service->passkeyPending(), 'each switch only turns off its own feature');
+
+		$switches['mimi_passkey_enabled'] = false;
+		self::assertFalse($service->passkeyPending());
 	}
 
 	public function testThePasskeyFrameIsMimisPageForOurClient(): void {
 		$appConfig = $this->createMock(IAppConfig::class);
 		$appConfig->method('getValueString')->willReturnCallback(
-			static fn (string $app, string $key, string $default = '') => $key === 'tendaworld_url' ? 'https://localhost:3000' : $default,
+			static fn (string $app, string $key, string $default = '') => $key === 'mimi_url' ? 'https://localhost:3000' : $default,
 		);
 		$service = new SecurySignService($appConfig, $this->createMock(IConfig::class), $this->createMock(ISession::class), $this->createMock(IUserSession::class), $this->createMock(IServerContainer::class), $this->createMock(IClientService::class), $this->createMock(LoggerInterface::class));
 
@@ -144,13 +205,20 @@ final class SecurySignServiceTest extends TestCase {
 	 * @param array<string, mixed> $certificate
 	 * @param array<string, mixed>|null $signature
 	 */
-	private function readinessOf(array $certificate, ?array $signature, ?string $handwriting): ?array {
+	/** @param string|null $contextFor the PEM the signing context names, or null when SecurySign has none */
+	private function readinessOf(array $certificate, ?array $signature, ?string $handwriting, ?string $contextScribble = null, ?string $contextFor = null): ?array {
 		$service = $this->getMockBuilder(SecurySignService::class)
-			->disableOriginalConstructor()->onlyMethods(['request', 'handwriting'])->getMock();
+			->disableOriginalConstructor()->onlyMethods(['request', 'handwriting', 'signingContext'])->getMock();
 		$service->method('request')->willReturnCallback(
 			static fn (string $path) => str_starts_with($path, 'pki/') ? $certificate : $signature,
 		);
 		$service->method('handwriting')->willReturn($handwriting);
+		$contextFor ??= $certificate['certificate']['certificatePem'] ?? '';
+		$service->method('signingContext')->willReturn($contextScribble === null ? null : [
+			'certificateSha256' => (string)openssl_x509_fingerprint($contextFor, 'sha256'),
+			'name' => 'Jane Njoroge', 'issuer' => 'Signa Hardware CA', 'handwriting' => $contextScribble,
+			'time' => new \DateTimeImmutable(), 'expiresAt' => new \DateTimeImmutable('+5 minutes'),
+		]);
 		return $service->readiness(self::IDENTITY);
 	}
 
@@ -164,20 +232,48 @@ final class SecurySignServiceTest extends TestCase {
 		$certificate = ['status' => 'active', 'credentialId' => 'cred-1', 'certificate' => ['certificateId' => 7, 'certificatePem' => $pem]];
 		$card = ['certificateId' => 7, 'imagePngBase64' => base64_encode(self::PNG_MAGIC . 'card')];
 
-		self::assertSame(base64_encode(self::PNG_MAGIC . 'scribble'), $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'scribble')['imagePngBase64']);
-		// A SecurySign without the handwriting route still yields its card.
-		self::assertSame($card['imagePngBase64'], $this->readinessOf($certificate, $card, null)['imagePngBase64']);
+		// The signing context's scribble comes first, even when the image route answers.
+		$context = $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'route', self::PNG_MAGIC . 'scribble');
+		self::assertSame([base64_encode(self::PNG_MAGIC . 'scribble'), SecurySignService::CARD_VERSION], [$context['imagePngBase64'], $context['card']]);
+		// Without a context, whatever the image route gives, marked below it.
+		$route = $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'route');
+		self::assertSame([base64_encode(self::PNG_MAGIC . 'route'), 4], [$route['imagePngBase64'], $route['card']]);
+		// A context for another certificate is not this signature.
+		$other = $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'route', self::PNG_MAGIC . 'scribble', self::selfSignedPem());
+		self::assertSame(base64_encode(self::PNG_MAGIC . 'route'), $other['imagePngBase64']);
+		// Without either, SecurySign's card, marked as the fallback.
+		$fallback = $this->readinessOf($certificate, $card, null);
+		self::assertSame([$card['imagePngBase64'], 3], [$fallback['imagePngBase64'], $fallback['card']]);
 	}
 
-	public function testTheHandwritingRouteIsReadWithTheUsersToken(): void {
-		self::$gets = 0;
+	public function testTheProfileLinkIsTheWebsitesCertificatePage(): void {
+		$values = [];
+		$appConfig = $this->createMock(IAppConfig::class);
+		$appConfig->method('getValueString')->willReturnCallback(static function (string $app, string $key, string $default = '') use (&$values): string {
+			return $values[$key] ?? $default;
+		});
+		$system = $this->createMock(IConfig::class);
+		$system->method('getSystemValueString')->willReturnCallback(static fn (string $key, string $default = '') => $default);
+		$service = new SecurySignService($appConfig, $system, $this->createMock(ISession::class), $this->createMock(IUserSession::class), $this->createMock(IServerContainer::class), $this->createMock(IClientService::class), $this->createMock(LoggerInterface::class));
+
+		self::assertSame('https://tendaworld.com/profile', $service->profileUrl());
+		$values['tendaworld_url'] = 'https://staging.tendaworld.com';
+		self::assertSame('https://staging.tendaworld.com/profile', $service->profileUrl());
+		// A MIMI address left in the website setting is MIMI's, not the website's.
+		$values['tendaworld_url'] = 'https://gopaperless.mimi.ke';
+		self::assertSame('https://tendaworld.com/profile', $service->profileUrl());
+	}
+
+	/**
+	 * A client without Keycloak's `basic` scope gets a 403 from this route on a
+	 * valid login. Read as a dead session, that logged the user out on every
+	 * page load: /login, Google, back to /login.
+	 */
+	public function testTheHandwritingRouteNeverEndsTheSession(): void {
 		self::assertSame(self::PNG_MAGIC . 'scribble', self::serviceAnswering(200, self::PNG_MAGIC . 'scribble')->handwriting(self::IDENTITY));
-		self::assertNull(self::serviceAnswering(404)->handwriting(self::IDENTITY));
-		try {
-			self::serviceAnswering(403)->handwriting(self::IDENTITY);
-			self::fail('HTTP 403 accepted');
-		} catch (\RuntimeException $e) {
-			self::assertSame(401, $e->getCode());
+		self::assertNull(self::serviceAnswering(200, '<html>')->handwriting(self::IDENTITY));
+		foreach ([401, 403, 404, 502] as $status) {
+			self::assertNull(self::serviceAnswering($status)->handwriting(self::IDENTITY), 'HTTP ' . $status);
 		}
 	}
 
@@ -391,7 +487,7 @@ final class SecurySignServiceTest extends TestCase {
 				$this->createMock(IServerContainer::class),
 				$this->createMock(IClientService::class),
 				$this->createMock(LoggerInterface::class),
-			])->onlyMethods(['identity', 'request', 'handwriting'])->getMock();
+			])->onlyMethods(['identity', 'request', 'handwriting', 'signingContext'])->getMock();
 		$service->method('identity')->willReturn([
 			'sub' => 'google-oauth2|1',
 			'issuer' => 'https://idp.test/realms/signa',
@@ -442,5 +538,57 @@ final class SecurySignServiceTest extends TestCase {
 		self::assertFalse($service->isReady());
 		self::assertFalse($service->isReady());
 		self::assertFalse($service->isReady(true));
+	}
+
+	/** The account page reads the certificate from the session's readiness answer, asking SecurySign at most once. */
+	public function testTheAccountPageCertificateComesFromTheReadinessAnswer(): void {
+		$cache = ['identity' => 'stale', 'ready' => true];
+		$session = $this->createMock(ISession::class);
+		$session->method('get')->willReturnCallback(static function () use (&$cache) {
+			return $cache;
+		});
+		$session->method('set')->willReturnCallback(static function (string $key, array $value) use (&$cache): void {
+			$cache = $value;
+		});
+		$service = $this->getMockBuilder(SecurySignService::class)
+			->setConstructorArgs([
+				$this->createMock(IAppConfig::class),
+				$this->createMock(IConfig::class),
+				$session,
+				$this->createMock(IUserSession::class),
+				$this->createMock(IServerContainer::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(LoggerInterface::class),
+			])->onlyMethods(['identity', 'readiness', 'syncVisibleSignature'])->getMock();
+		$service->method('identity')->willReturn([
+			'sub' => 'google-oauth2|1',
+			'issuer' => 'https://idp.test/realms/signa',
+			'accessToken' => 'at',
+		]);
+		$service->expects(self::once())->method('readiness')->willReturn([
+			'certificateId' => '7', 'imagePngBase64' => '', 'card' => SecurySignService::CARD_VERSION,
+			'issuer' => 'Signa Hardware CA', 'serial' => '4F3A', 'validFrom' => '13 Oct 2026', 'validUntil' => '13 Oct 2027',
+		]);
+
+		$expected = ['issuer' => 'Signa Hardware CA', 'serial' => '4F3A', 'validUntil' => '13 Oct 2027'];
+		self::assertSame($expected, $service->signingCertificate(), 'an older session asks once');
+		self::assertSame($expected, $service->signingCertificate(), 'then the session answers');
+	}
+
+	public function testAnOutageLeavesTheAccountPageWithoutCertificateDetails(): void {
+		$service = $this->getMockBuilder(SecurySignService::class)
+			->setConstructorArgs([
+				$this->createMock(IAppConfig::class),
+				$this->createMock(IConfig::class),
+				$this->createMock(ISession::class),
+				$this->createMock(IUserSession::class),
+				$this->createMock(IServerContainer::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(LoggerInterface::class),
+			])->onlyMethods(['identity', 'readiness'])->getMock();
+		$service->method('identity')->willReturn(['sub' => 's', 'issuer' => 'i', 'accessToken' => 'at']);
+		$service->method('readiness')->willThrowException(new \RuntimeException('SecurySign answered HTTP 502', 503));
+
+		self::assertNull($service->signingCertificate());
 	}
 }

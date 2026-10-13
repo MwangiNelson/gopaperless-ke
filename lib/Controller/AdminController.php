@@ -1269,26 +1269,46 @@ class AdminController extends AEnvironmentAwareController {
 	 *
 	 * @param int $providerId The user_oidc provider that is SecurySign; 0 turns the integration off
 	 * @param string $url SecurySign's address, such as https://securysign.com
-	 * @param string $tendaworldUrl Where users without a certificate enrol
+	 * @param string $tendaworldUrl The TendaWorld website's address; empty means https://tendaworld.com
 	 * @param string $signingSecret SecurySign signing (SSC) secret; empty keeps the stored one
 	 * @param string $mimiClientSecret GoPaperless's MIMI partner secret, for the passkey check after sign-in; empty keeps the stored one
 	 * @param string $mimiClientId GoPaperless's MIMI partner client ID (its subdomain); empty means gopaperless
+	 * @param string $mimiUrl MIMI's address, for the passkey check and MIMI enrolment; empty means https://gopaperless.mimi.ke
+	 * @param bool $signingEnabled Whether SecurySign users sign with SecurySign once the signing secret is set
+	 * @param bool $mimiPasskeyEnabled Whether SecurySign users confirm with their MIMI passkey after sign-in once the MIMI secret is set
+	 * @param 'tendaworld'|'mimi' $enrolmentSite Where users without a certificate enrol
 	 * @return DataResponse<Http::STATUS_OK, LibresignMessageResponse, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, LibresignErrorResponse, array{}>
 	 *
 	 * 200: Configuration saved successfully
-	 * 400: An address is not a bare https origin
+	 * 400: An address is not a bare https origin, or the enrolment site is unknown
 	 */
 	#[NoCSRFRequired]
 	#[ApiRoute(verb: 'POST', url: '/api/{apiVersion}/admin/securysign-config', requirements: ['apiVersion' => '(v1)'])]
-	public function setSecurySignConfig(int $providerId = 0, string $url = '', string $tendaworldUrl = '', string $signingSecret = '', string $mimiClientSecret = '', string $mimiClientId = ''): DataResponse {
+	public function setSecurySignConfig(
+		int $providerId = 0,
+		string $url = '',
+		string $tendaworldUrl = '',
+		string $signingSecret = '',
+		string $mimiClientSecret = '',
+		string $mimiClientId = '',
+		string $mimiUrl = '',
+		bool $signingEnabled = true,
+		bool $mimiPasskeyEnabled = true,
+		string $enrolmentSite = 'tendaworld',
+	): DataResponse {
 		$mimiClientId = strtolower(trim($mimiClientId));
 		if ($mimiClientId !== '' && !preg_match('/^[a-z0-9][a-z0-9.-]{0,98}$/', $mimiClientId)) {
 			return new DataResponse([
 				'error' => $this->l10n->t('The MIMI client ID is the partner\'s subdomain, such as gopaperless'),
 			], Http::STATUS_BAD_REQUEST);
 		}
+		if (!in_array($enrolmentSite, ['tendaworld', 'mimi'], true)) {
+			return new DataResponse([
+				'error' => $this->l10n->t('Choose the TendaWorld website or MIMI for enrolment'),
+			], Http::STATUS_BAD_REQUEST);
+		}
 		try {
-			foreach (array_filter([$url, $tendaworldUrl]) as $origin) {
+			foreach (array_filter([$url, $tendaworldUrl, $mimiUrl]) as $origin) {
 				SecurySignService::origin($origin);
 			}
 		} catch (\RuntimeException) {
@@ -1303,6 +1323,10 @@ class AdminController extends AEnvironmentAwareController {
 		$this->setPaymentConfig('mimi_client_secret', $mimiClientSecret, true);
 		// Empty clears it, and the default (gopaperless) applies.
 		$this->setPaymentConfig('mimi_client_id', $mimiClientId);
+		$this->setPaymentConfig('mimi_url', rtrim($mimiUrl, '/'));
+		$this->appConfig->setValueBool(Application::APP_ID, 'securysign_signing_enabled', $signingEnabled);
+		$this->appConfig->setValueBool(Application::APP_ID, 'mimi_passkey_enabled', $mimiPasskeyEnabled);
+		$this->appConfig->setValueString(Application::APP_ID, 'enrolment_site', $enrolmentSite);
 		return new DataResponse([
 			'message' => $this->l10n->t('SecurySign settings saved'),
 		]);

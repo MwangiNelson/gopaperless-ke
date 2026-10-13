@@ -15,7 +15,25 @@
 				</div>
 				<div class="user-password">
 					<h3>{{ t('libresign', 'Certificate') }}</h3>
-					<ManagePassword />
+					<a v-if="securySignSigns"
+						:href="securySignProfileUrl"
+						class="securysign-certificate"
+						target="_blank"
+						rel="noopener noreferrer">
+						<dl v-if="securySignCertificate">
+							<dt>{{ t('libresign', 'Issuer') }}</dt>
+							<dd>{{ securySignCertificate.issuer }}</dd>
+							<dt>{{ t('libresign', 'Serial') }}</dt>
+							<dd>{{ securySignCertificate.serial }}</dd>
+							<dt>{{ t('libresign', 'Valid until') }}</dt>
+							<dd>{{ securySignCertificate.validUntil }}</dd>
+						</dl>
+						<p v-else>
+							{{ t('libresign', 'Your SecurySign certificate details are not available right now.') }}
+						</p>
+						<span class="securysign-certificate__open">{{ t('libresign', 'View on TendaWorld') }} ↗</span>
+					</a>
+					<ManagePassword v-else />
 				</div>
 			</div>
 		</div>
@@ -31,6 +49,7 @@
 import { t } from '@nextcloud/l10n'
 
 import { getCurrentUser } from '@nextcloud/auth'
+import { loadState } from '@nextcloud/initial-state'
 
 import Documents from './partials/Documents.vue'
 import ManagePassword from './partials/ManagePassword.vue'
@@ -51,6 +70,18 @@ const user: User = {
 	uid: currentUser?.uid ?? '',
 	displayName: currentUser?.displayName ?? '',
 }
+
+type SecurySignCertificate = {
+	issuer: string
+	serial: string
+	validUntil: string
+}
+
+// SecurySign holds the key, so its users have no local certificate to manage.
+const securySignSigns = loadState<boolean>('libresign', 'securysign_signs', false)
+const securySignCertificate = loadState<SecurySignCertificate | null>('libresign', 'securysign_certificate', null)
+// The website signs a SecurySign user in from the session both sites share.
+const securySignProfileUrl = loadState<string>('libresign', 'securysign_profile_url', 'https://tendaworld.com/profile')
 
 defineExpose({
 	user,
@@ -117,6 +148,39 @@ defineExpose({
 			.user-password{
 				display: flex;
 				flex-direction: column;
+			}
+
+			.securysign-certificate{
+				display: block;
+				margin: 0 -8px;
+				padding: 8px;
+				border-radius: var(--border-radius-large);
+				color: inherit;
+				text-decoration: none;
+
+				&:hover, &:focus-visible{
+					background-color: var(--color-background-hover);
+				}
+
+				dl, p{
+					margin: 0;
+				}
+
+				&__open{
+					display: inline-block;
+					margin-top: 12px;
+					color: var(--color-primary-element);
+				}
+
+				dt{
+					color: var(--color-text-maxcontrast);
+					margin-top: 8px;
+				}
+
+				dd{
+					margin: 0;
+					overflow-wrap: anywhere;
+				}
 			}
 		}
 

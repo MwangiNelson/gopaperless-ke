@@ -61,9 +61,12 @@ class SecurySignController extends Controller {
 				'state' => $state, 'sub' => $identity['sub'], 'uid' => $this->users->getUser()->getUID(),
 				'returnTo' => $path, 'expires' => time() + 3600,
 			]);
-			return new RedirectResponse($this->signa->onboardingUrl() . '?' . http_build_query([
-				'state' => $state, 'subject' => $identity['sub'],
-			]));
+			return new RedirectResponse($this->signa->enrolmentUrl(
+				$state,
+				$identity['sub'],
+				(string)$this->users->getUser()?->getEMailAddress(),
+				$this->urls->linkToRouteAbsolute('libresign.securySign.complete', ['state' => $state]),
+			));
 		} catch (\Throwable $e) {
 			return $this->bail($e, $path);
 		}
