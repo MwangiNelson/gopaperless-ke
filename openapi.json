@@ -188,7 +188,9 @@
                                     "full-signature-width",
                                     "full-signature-height",
                                     "signature-width",
-                                    "signature-height"
+                                    "signature-height",
+                                    "signature-minimum-width",
+                                    "signature-minimum-height"
                                 ],
                                 "properties": {
                                     "is-available": {
@@ -210,6 +212,14 @@
                                         "format": "double"
                                     },
                                     "signature-height": {
+                                        "type": "number",
+                                        "format": "double"
+                                    },
+                                    "signature-minimum-width": {
+                                        "type": "number",
+                                        "format": "double"
+                                    },
+                                    "signature-minimum-height": {
                                         "type": "number",
                                         "format": "double"
                                     }

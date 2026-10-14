@@ -82,6 +82,7 @@ import {
 import SignerMenu from './SignerMenu.vue'
 import SignatureBox from './SignatureBox.vue'
 import {
+	atLeastMinimum,
 	buildPdfEditorSignerPayload,
 	calculatePdfPlacement,
 	createPdfEditorObject,
@@ -303,8 +304,7 @@ function startAddingSigner(signer: SignerSummaryRecord | SignerDetailRecord | nu
 		type: 'signature',
 		x: 0,
 		y: 0,
-		width: size.width,
-		height: size.height,
+		...atLeastMinimum({ width: size.width, height: size.height }),
 		signer: signerPayload,
 	})
 
