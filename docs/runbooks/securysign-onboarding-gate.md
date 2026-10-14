@@ -63,7 +63,11 @@ occ config:app:set libresign signing_card_layout   --value horizontal-top
 
 - `signing_card_layout` is the card on a signed PDF: `horizontal-top` (the
   default), `horizontal` or `stacked`. It applies to documents signed with
-  SecurySign and with GoPaperless's own certificate.
+  SecurySign and with GoPaperless's own certificate. `horizontal-top` is one
+  composition scaled whole into the signature box: the visible signature
+  scribble with ISSUER and TIMESTAMP small against its top right and the name
+  under it. A tight box gets a smaller copy of the same card. The scribble is
+  cut to its ink first, so the canvas margin it was drawn with takes no room.
 - Both switches count as on until someone turns them off, so an instance that
   already has a secret keeps its behaviour.
 - A MIMI address left in `tendaworld_url` is read as the MIMI address, and

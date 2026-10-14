@@ -119,29 +119,60 @@ final class SigningCardLayoutTest extends TestCase {
 		}
 	}
 
-	/** horizontal-top: TIMESTAMP straight under ISSUER, both at the top of the right column. */
-	public function testTheTopAlignedCardStacksIssuerAndTimestampAtTheTop(): void {
-		foreach ([[240.0, 70.0], [160.0, 50.0], [300.0, 110.0]] as [$width, $height]) {
+	/**
+	 * horizontal-top, the default: one composition scaled whole into the box.
+	 * ISSUER and TIMESTAMP sit against the scribble's top right like a
+	 * superscript, the name under it, and a tighter box gets a smaller copy of
+	 * the same card rather than a rearranged one.
+	 */
+	public function testTheDefaultCardIsOneCompositionScaledIntoTheBox(): void {
+		$textWidth = static fn (string $text, bool $bold): float => (new \ReflectionMethod(PhpNativeHandler::class, 'helveticaWidth'))->invoke(null, $text, $bold);
+		$time = '05 Oct 2026, 14:32:08 EAT';
+		$shares = [];
+		foreach ([[350.0, 100.0], [160.0, 40.0], [120.0, 90.0]] as [$width, $height]) {
 			$card = $this->card('Jane Wanjiku Njoroge') + ['layout' => 'horizontal-top'];
-			[$xObject, $frame] = PhpNativeHandler::signingCardLayout($card, $width, $height);
-			[$x, $y, $w, $h] = $frame;
-			self::assertEqualsWithDelta(3.0, $w / $h, 0.01, 'the handwriting keeps its shape');
-			self::assertLessThanOrEqual($height, $y + $h, 'the handwriting is not cut off');
-
+			[$xObject, [$x, $y, $w, $h]] = PhpNativeHandler::signingCardLayout($card, $width, $height);
 			preg_match_all('/([\d.]+) Tf ([\d.]+) Tc [\d. ]+ rg ([\d.]+) ([\d.]+) Td \(([^)]*)\) Tj/', $xObject->stream, $lines, PREG_SET_ORDER);
 			$at = [];
 			foreach ($lines as [, $size, , $lx, $ly, $text]) {
 				$at[$text] = [(float)$lx, (float)$ly, (float)$size];
 			}
-			$time = '05 Oct 2026, 14:32:08 EAT';
+			$name = $at['JANE WANJIKU NJOROGE'];
+
+			self::assertEqualsWithDelta(3.0, $w / $h, 0.01, 'the scribble keeps its shape');
+			self::assertGreaterThanOrEqual(0.0, $x, 'inside the box');
+			self::assertLessThanOrEqual($height, $y + $h, 'inside the box');
+			self::assertGreaterThanOrEqual(0.0, $name[1] - $name[2] * 0.22, 'inside the box');
+			self::assertLessThanOrEqual($width, $at[$time][0] + $textWidth($time, false) * $at[$time][2], 'inside the box');
+
+			self::assertEqualsWithDelta($x + $w, $at['ISSUER'][0], $w * 0.05, 'ISSUER just after the scribble');
+			self::assertEqualsWithDelta($y + $h, $at['ISSUER'][1] + $at['ISSUER'][2] * 0.75, $h * 0.02, 'ISSUER level with the scribble top');
 			$order = ['ISSUER', 'SIGNA HARDWARE CA', 'TIMESTAMP', $time];
 			for ($i = 1; $i < count($order); $i++) {
 				self::assertGreaterThan($at[$order[$i]][1], $at[$order[$i - 1]][1], $order[$i - 1] . ' above ' . $order[$i]);
 				self::assertEqualsWithDelta($at['ISSUER'][0], $at[$order[$i]][0], 0.01, 'one left edge');
 			}
-			self::assertGreaterThan($at['JANE WANJIKU NJOROGE'][1], $at[$time][1], 'TIMESTAMP no longer level with the name');
-			self::assertGreaterThan(0.0, $at[$time][1] - $at[$time][2] * 0.25, 'TIMESTAMP stays inside the box');
+			self::assertEqualsWithDelta($x, $name[0], 0.01, 'the name starts under the scribble');
+			self::assertLessThan($y, $name[1], 'the name under the scribble');
+			$shares[] = $name[2] / $h;
 		}
+		foreach ($shares as $share) {
+			self::assertEqualsWithDelta($shares[0], $share, $shares[0] * 0.02, 'every box gets the same card, only its size changes');
+		}
+	}
+
+	public function testTheScribbleIsCutToItsInk(): void {
+		$canvas = imagecreatetruecolor(600, 200);
+		imagesavealpha($canvas, true);
+		imagefill($canvas, 0, 0, imagecolorallocatealpha($canvas, 0, 0, 0, 127));
+		imagefilledrectangle($canvas, 100, 60, 399, 139, imagecolorallocate($canvas, 20, 30, 90));
+		$path = tempnam(sys_get_temp_dir(), 'ink') . '.png';
+		imagepng($canvas, $path);
+
+		$trimmed = imagecreatefromstring((string)PhpNativeHandler::trimmedScribble($path));
+		self::assertSame([304, 84], [imagesx($trimmed), imagesy($trimmed)], 'the ink plus two pixels of air');
+		self::assertNull(PhpNativeHandler::trimmedScribble($this->handwriting), 'nothing to cut');
+		unlink($path);
 	}
 
 	/** Without SecurySign, GoPaperless fills the card: profile name, issuer, signing time, the box's own drawing. */

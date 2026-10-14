@@ -16,6 +16,7 @@ use OCA\Libresign\Service\SignatureTextService;
 use OCA\Libresign\Service\SignerElementsService;
 use OCP\Files\File;
 use OCP\IAppConfig;
+use OCP\ITempManager;
 use SignerPHP\Application\Contract\CertificateValidatorInterface;
 use SignerPHP\Application\DTO\CertificateCredentialsDto;
 use SignerPHP\Application\DTO\CertificationLevel;
@@ -180,6 +181,11 @@ class PhpNativeHandler extends Pkcs12Handler {
 			// wins over the box's imported copy. A card drawn from the certificate,
 			// or the built-in one, has none and draws the box's signature.
 			$card = $this->signingCard + ['handwriting' => $signatureImagePath];
+			$trimmed = self::trimmedScribble($card['handwriting']);
+			if ($trimmed !== null) {
+				$card['handwriting'] = \OCP\Server::get(ITempManager::class)->getTemporaryFile('.png');
+				file_put_contents($card['handwriting'], $trimmed);
+			}
 			[$xObject, $frame] = self::signingCardLayout($card, (float)$width, (float)$height);
 			return new SignatureAppearanceDto(
 				backgroundImagePath: null,
@@ -537,8 +543,11 @@ class PhpNativeHandler extends Pkcs12Handler {
 	 */
 	public static function signingCardLayout(array $card, float $width, float $height): array {
 		$layout = $card['layout'] ?? 'stacked';
-		if ($layout === 'horizontal' || $layout === 'horizontal-top') {
-			return self::horizontalCardLayout($card, $width, $height, $layout === 'horizontal-top');
+		if ($layout === 'horizontal-top') {
+			return self::compactCardLayout($card, $width, $height);
+		}
+		if ($layout === 'horizontal') {
+			return self::horizontalCardLayout($card, $width, $height);
 		}
 		$pad = max(4.0, $height * 0.06);
 		$room = max(1.0, $width - 2 * $pad);
@@ -597,15 +606,14 @@ class PhpNativeHandler extends Pkcs12Handler {
 	 *                      05 Oct 2026, 16:32:08 EAT
 	 *
 	 * ISSUER sits level with the top of the handwriting and TIMESTAMP level with
-	 * the name. With horizontal-top, TIMESTAMP sits straight under ISSUER, both
-	 * from the top of the right column. Labels are small spaced grey capitals
+	 * the name. Labels are small spaced grey capitals
 	 * over darker values. The handwriting is fitted whole into the left column,
 	 * never cropped.
 	 *
 	 * @param array{name: string, issuer: string, time: \DateTimeImmutable, handwriting: string} $card
 	 * @return array{0: SignatureAppearanceXObjectDto, 1: array{0: float, 1: float, 2: float, 3: float}|null}
 	 */
-	private static function horizontalCardLayout(array $card, float $width, float $height, bool $topAligned = false): array {
+	private static function horizontalCardLayout(array $card, float $width, float $height): array {
 		$pad = max(3.0, min($width, $height) * 0.07);
 		$gap = $pad * 1.4;
 		$split = $width * 0.56;
@@ -650,15 +658,9 @@ class PhpNativeHandler extends Pkcs12Handler {
 		$nameY = $pad + $nameSize * 0.22;
 		$issuerLabelY = $height - $pad - $labelSize * 0.75;
 		$issuerY = $issuerLabelY - $labelSize * 0.45 - $valueSize * 0.9;
-		if ($topAligned) {
-			// horizontal-top: TIMESTAMP straight under ISSUER, both from the top.
-			$timeLabelY = $issuerY - $valueSize * 0.85 - $labelSize * 0.95;
-			$timeY = $timeLabelY - $labelSize * 0.45 - $valueSize * 0.9;
-		} else {
-			// TIMESTAMP shares the baseline of the name's last line.
-			$timeY = $nameY;
-			$timeLabelY = $timeY + $valueSize * 0.95 + $labelSize * 0.3;
-		}
+		// TIMESTAMP shares the baseline of the name's last line.
+		$timeY = $nameY;
+		$timeLabelY = $timeY + $valueSize * 0.95 + $labelSize * 0.3;
 
 		$stream = '';
 		foreach (array_reverse($nameLines) as $i => $line) {
@@ -685,6 +687,138 @@ class PhpNativeHandler extends Pkcs12Handler {
 			new SignatureAppearanceXObjectDto(stream: $stream, resources: ['Font' => ['F1' => $font('Helvetica'), 'F2' => $font('Helvetica-Bold')]]),
 			$frame,
 		];
+	}
+
+	/**
+	 * The default card (signing_card_layout = horizontal-top), one composition
+	 * scaled whole into the box, like a stamp:
+	 *
+	 *   +--------------------+ ISSUER
+	 *   |  visible signature | SIGNA HARDWARE CA
+	 *   |  scribble          | TIMESTAMP
+	 *   +--------------------+ 14 Oct 2026, 14:08:15 EAT
+	 *   JANE WANJIKU NJOROGE
+	 *
+	 * ISSUER and TIMESTAMP sit against the scribble's top right like a
+	 * superscript, and the name under it like the line it was signed on. It is
+	 * laid out in card units, then every size and position is scaled by one
+	 * factor and centred, so a tight box gets a smaller copy of the same card,
+	 * never a rearranged one, and nothing spills onto the page around it.
+	 *
+	 * @param array{name: string, issuer: string, time: \DateTimeImmutable, handwriting: string} $card
+	 * @return array{0: SignatureAppearanceXObjectDto, 1: array{0: float, 1: float, 2: float, 3: float}|null}
+	 */
+	private static function compactCardLayout(array $card, float $width, float $height): array {
+		$name = mb_strtoupper(trim($card['name']));
+		$issuer = mb_strtoupper($card['issuer']);
+		$time = $card['time']->setTimezone(new \DateTimeZone('Africa/Nairobi'))->format('d M Y, H:i:s') . ' EAT';
+
+		// The scribble fits a 70 x 21 card-unit box, keeping its shape, its
+		// bottom left at the origin.
+		[$sw, $sh] = [70.0, 21.0];
+		$image = @getimagesize($card['handwriting']);
+		$hasImage = is_array($image) && $image[0] > 0 && $image[1] > 0;
+		if ($hasImage) {
+			$fit = min($sw / $image[0], $sh / $image[1]);
+			[$sw, $sh] = [$image[0] * $fit, $image[1] * $fit];
+		}
+
+		// The right column starts just after the scribble, from its top down.
+		$gap = 2.5;
+		$value = min(3.0, 30.0 / max(0.01, self::helveticaWidth($issuer, false), self::helveticaWidth($time, false)));
+		$label = $value * 0.62;
+		$tracking = $label * 0.12;
+		$rightX = $sw + $gap;
+		$rightW = max(self::helveticaWidth($issuer, false) * $value, self::helveticaWidth($time, false) * $value,
+			self::helveticaWidth('TIMESTAMP', false) * $label + 8 * $tracking);
+		$issuerLabelY = $sh - $label * 0.75;
+		$issuerY = $issuerLabelY - $label * 0.45 - $value * 0.9;
+		$timeLabelY = $issuerY - $value * 0.85 - $label * 0.95;
+		$timeY = $timeLabelY - $label * 0.45 - $value * 0.9;
+
+		// The name runs under whichever ends lower, the scribble or the column,
+		// across the card's width at most; a long one takes two lines first.
+		$cardW = $rightX + $rightW;
+		$nameCap = 4.0;
+		$nameLines = [$name];
+		if ($cardW / max(0.01, self::helveticaWidth($name, true)) < $nameCap * 0.7 && preg_match('/\s/', $name)) {
+			$nameLines = self::balancedLines($name);
+		}
+		$widest = max(array_map(static fn (string $line): float => self::helveticaWidth($line, true), $nameLines));
+		$nameSize = min($nameCap, $cardW / max(0.01, $widest));
+		$nameTop = min(0.0, $timeY - $value * 0.25) - 1.2;
+		$nameYs = [];
+		foreach ($nameLines as $i => $line) {
+			$nameYs[] = $nameTop - $nameSize * (0.75 + $i * 1.12);
+		}
+		$bottom = end($nameYs) - $nameSize * 0.22;
+
+		// One factor for everything, with a sliver of margin, centred in the box.
+		$cardH = $sh - $bottom;
+		$s = min($width * 0.94 / $cardW, $height * 0.94 / $cardH);
+		$ox = ($width - $cardW * $s) / 2;
+		$oy = ($height - $cardH * $s) / 2 - $bottom * $s;
+
+		$text = static function (string $font, float $size, string $colour, float $x, float $y, string $value, float $spacing = 0.0) use ($s, $ox, $oy): string {
+			$encoded = (string)(iconv('UTF-8', 'Windows-1252//TRANSLIT', $value) ?: $value);
+			return sprintf("BT /%s %.2F Tf %.2F Tc %s rg %.2F %.2F Td (%s) Tj ET\n", $font, $size * $s, $spacing * $s, $colour,
+				$ox + $x * $s, $oy + $y * $s, self::escapePdfText($encoded));
+		};
+		$labelColour = '0.48 0.51 0.57';
+		$valueColour = '0.20 0.22 0.27';
+		$stream = $text('F1', $label, $labelColour, $rightX, $issuerLabelY, 'ISSUER', $tracking)
+			. $text('F1', $value, $valueColour, $rightX, $issuerY, $issuer)
+			. $text('F1', $label, $labelColour, $rightX, $timeLabelY, 'TIMESTAMP', $tracking)
+			. $text('F1', $value, $valueColour, $rightX, $timeY, $time);
+		foreach ($nameLines as $i => $line) {
+			$stream .= $text('F2', $nameSize, '0.04 0.07 0.13', 0.0, $nameYs[$i], $line);
+		}
+
+		$font = static fn (string $base): array => ['Type' => '/Font', 'Subtype' => '/Type1', 'BaseFont' => '/' . $base, 'Encoding' => '/WinAnsiEncoding'];
+		return [
+			new SignatureAppearanceXObjectDto(stream: $stream, resources: ['Font' => ['F1' => $font('Helvetica'), 'F2' => $font('Helvetica-Bold')]]),
+			$hasImage ? [$ox, $oy, $sw * $s, $sh * $s] : null,
+		];
+	}
+
+	/**
+	 * $from's PNG cut to the ink, so the visible signature scribble fills its
+	 * frame instead of floating in the margin of the canvas it was drawn on.
+	 * Ink is any pixel that is mostly opaque and not near white. Null when GD
+	 * can't read it or there is nothing to cut.
+	 * ponytail: one pass over every pixel, fine for a signature canvas.
+	 */
+	public static function trimmedScribble(string $from): ?string {
+		$image = @imagecreatefrompng($from);
+		if ($image === false) {
+			return null;
+		}
+		$w = imagesx($image);
+		$h = imagesy($image);
+		[$left, $top, $right, $bottom] = [$w, $h, -1, -1];
+		for ($y = 0; $y < $h; $y++) {
+			for ($x = 0; $x < $w; $x++) {
+				$c = imagecolorsforindex($image, imagecolorat($image, $x, $y));
+				if ($c['alpha'] < 96 && $c['red'] + $c['green'] + $c['blue'] < 690) {
+					[$left, $top, $right, $bottom] = [min($left, $x), min($top, $y), max($right, $x), max($bottom, $y)];
+				}
+			}
+		}
+		if ($right < 0 || ($left === 0 && $top === 0 && $right === $w - 1 && $bottom === $h - 1)) {
+			return null;
+		}
+		// A few pixels of air, so the strokes' soft edges aren't clipped.
+		$air = 2;
+		$crop = imagecrop($image, ['x' => max(0, $left - $air), 'y' => max(0, $top - $air),
+			'width' => min($w, $right + $air + 1) - max(0, $left - $air), 'height' => min($h, $bottom + $air + 1) - max(0, $top - $air)]);
+		if ($crop === false) {
+			return null;
+		}
+		imagealphablending($crop, false);
+		imagesavealpha($crop, true);
+		ob_start();
+		imagepng($crop);
+		return (string)ob_get_clean();
 	}
 
 	/**
