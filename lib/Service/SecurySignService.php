@@ -405,10 +405,9 @@ class SecurySignService {
 
 	/**
 	 * Mirror the SecurySign card into the user's LibreSign signature elements so
-	 * it is what lands on a document. SecurySign owns it: SecurySignMiddleware
-	 * refuses the endpoints that create, change or delete one, so any element a
-	 * gated user has came from here, and one that names a superseded certificate
-	 * is replaced after a renewal.
+	 * it is what lands on a document. SecurySign owns it: one drawn here is saved
+	 * to SecurySign first and arrives through here too, deleting one is refused,
+	 * and one that names a superseded certificate is replaced after a renewal.
 	 *
 	 * Takes the readiness array rather than re-reading it, so a page load still
 	 * costs one pair of calls to SecurySign. Failures are logged and swallowed:
@@ -416,8 +415,9 @@ class SecurySignService {
 	 * to lock someone out of the app.
 	 *
 	 * @param array{certificateId: string, imagePngBase64: string, card: int} $readiness
+	 * @param bool $replace true for a signature just drawn: it replaces the current one even when that one is up to date
 	 */
-	public function syncVisibleSignature(array $readiness): void {
+	public function syncVisibleSignature(array $readiness, bool $replace = false): void {
 		$user = $this->users->getUser();
 		if ($user === null) {
 			return;
@@ -445,7 +445,7 @@ class SecurySignService {
 			// the old image forever, because their certificate had not changed. An
 			// older import, which may be SecurySign's card, gives way to the
 			// visible signature scribble at the next sign-in.
-			foreach ($existing as $element) {
+			foreach ($replace ? [] : $existing as $element) {
 				$metadata = $element->getMetadata() ?? [];
 				if (($metadata['securysign_certificate_id'] ?? null) === $readiness['certificateId']
 					&& ($metadata['securysign_card'] ?? 0) >= $readiness['card']) {
@@ -515,7 +515,7 @@ class SecurySignService {
 			'certificateId' => (string)$body['certificateId'],
 			'imagePngBase64' => base64_encode($png),
 			'card' => self::CARD_VERSION,
-		]);
+		], true);
 	}
 
 	/** The next isReady() asks SecurySign again instead of trusting the session. */

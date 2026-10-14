@@ -83,8 +83,7 @@ class SignatureElementsController extends AEnvironmentAwareController implements
 		try {
 			$this->validateHelper->validateVisibleElements($elements, $this->validateHelper::TYPE_VISIBLE_ELEMENT_USER);
 			// A SecurySign user's signature belongs to SecurySign, so it is saved
-			// there and comes back as their imported one. This runs only when
-			// SecurySign gave GoPaperless no scribble for them.
+			// there and comes back as their imported one.
 			if ($this->securySign->applies()) {
 				foreach ($elements as $i => $element) {
 					if (($element['type'] ?? '') === 'signature') {
@@ -319,7 +318,15 @@ class SignatureElementsController extends AEnvironmentAwareController implements
 				);
 				$element['elementId'] = $userElement['id'];
 			}
-			$this->accountService->saveVisibleElement($element, $this->sessionService->getSessionId(), $user);
+			// A SecurySign user's new signature is saved to SecurySign and comes
+			// back as their imported one. SecurySign signs the new image with the
+			// same key, so their certificate is untouched.
+			if ($this->securySign->applies() && ($element['type'] ?? $userElement['type'] ?? '') === 'signature'
+				&& isset($element['file']['base64'])) {
+				$this->securySign->saveDrawnSignature((string)$element['file']['base64']);
+			} else {
+				$this->accountService->saveVisibleElement($element, $this->sessionService->getSessionId(), $user);
+			}
 			/** @var LibresignUserElement[] $elements */
 			$elements = (
 				$this->userSession->getUser() instanceof IUser

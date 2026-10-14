@@ -246,14 +246,19 @@ LibreSign's old appearance.
 (`$signatureImagePath = $element->getTempFile()`), so the handwriting plus the
 template text plus the QR are what land on the page.
 
-LibreSign's own signature module is the fallback. `hasMirroredSignature()` asks
-whether a stored element carries `securysign_certificate_id`; only then are the
-mutating endpoints refused. With nothing mirrored, because the import has not run
-or has failed, the user can draw one and sign, and the next successful import
-replaces it. Without that, a failed import leaves them told to draw a signature
-the API will not let them draw, and `SignFileService::retrieveUserElement()`
-refuses the signature with "You need to define a visible signature or initials to
-sign this document."
+A SecurySign user who draws a signature in GoPaperless, a first one or a new one,
+has it saved to SecurySign first (`POST /api/signature/visible`), and it comes
+back as their imported signature. SecurySign signs the new image with the same
+key and keeps the same QR code, so the certificate and documents already signed
+are untouched. Deleting it is refused while a stored element carries
+`securysign_certificate_id` (`hasMirroredSignature()`).
+
+LibreSign's own signature module is the fallback. With nothing mirrored, because
+the import has not run or has failed, nothing is refused: the user can draw one
+and sign. Without that, a failed import leaves them told to draw a signature the
+API will not let them draw, and `SignFileService::retrieveUserElement()` refuses
+the signature with "You need to define a visible signature or initials to sign
+this document."
 
 Editing is refused at the endpoints that mutate — `createSignatureElement`,
 `patchSignatureElement`, `deleteSignatureElement` return 403 while the gate

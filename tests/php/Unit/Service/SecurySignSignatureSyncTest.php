@@ -108,6 +108,19 @@ final class SecurySignSignatureSyncTest extends TestCase {
 		$this->service->syncVisibleSignature(['imagePngBase64' => ''] + self::CARD);
 	}
 
+	/** A signature just drawn and saved to SecurySign replaces the current one, up to date or not. */
+	public function testADrawnSignatureReplacesAnUpToDateOne(): void {
+		$current = $this->element(1, '7');
+		$fresh = $this->element(2, null);
+		$this->mapper->method('findMany')->willReturnOnConsecutiveCalls([$current], [$current, $fresh]);
+		$this->accounts->expects(self::once())->method('saveVisibleElement');
+		$this->mapper->expects(self::once())->method('delete')->with($current);
+
+		$this->service->syncVisibleSignature(self::CARD, true);
+
+		self::assertSame('7', ($fresh->getMetadata() ?? [])['securysign_certificate_id']);
+	}
+
 	public function testAFirstCardIsImportedAndStampedWithItsCertificate(): void {
 		$imported = $this->element(9, null);
 		$this->mapper->method('findMany')->willReturnOnConsecutiveCalls([], [$imported]);

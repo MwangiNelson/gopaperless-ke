@@ -42,8 +42,10 @@ final class SignatureElementsControllerSecurySignTest extends TestCase {
 		$users->method('getUser')->willReturn($user);
 		$l10n = $this->createMock(IL10N::class);
 		$l10n->method('t')->willReturnArgument(0);
+		$elements = $this->createMock(SignerElementsService::class);
+		$elements->method('getUserElementByNodeId')->willReturn(['id' => 1, 'type' => 'signature']);
 		return new SignatureElementsController(
-			$this->createMock(IRequest::class), $l10n, $accounts, $this->createMock(SignerElementsService::class),
+			$this->createMock(IRequest::class), $l10n, $accounts, $elements,
 			$this->createMock(SignatureTextService::class), $users, $this->createMock(SessionService::class),
 			$this->createMock(SignFileService::class), $this->createMock(IPreview::class), $this->createMock(IMimeIconProvider::class),
 			$this->createMock(IURLGenerator::class), $this->createMock(ValidateHelper::class), $securySign,
@@ -70,6 +72,18 @@ final class SignatureElementsControllerSecurySignTest extends TestCase {
 		$response = $this->controller(true, $accounts, $securySign)->createSignatureElement([self::SIGNATURE]);
 
 		self::assertSame([422, 'SecurySign could not save your signature: Invalid image'], [$response->getStatus(), $response->getData()['message']]);
+	}
+
+	/** Changing a signature they already have goes to SecurySign too, not only a first one. */
+	public function testARedrawnSignatureGoesToSecurySign(): void {
+		$securySign = $this->createMock(SecurySignService::class);
+		$securySign->expects(self::once())->method('saveDrawnSignature')->with(self::SIGNATURE['file']['base64']);
+		$accounts = $this->createMock(AccountService::class);
+		$accounts->expects(self::never())->method('saveVisibleElement');
+
+		$response = $this->controller(true, $accounts, $securySign)->patchSignatureElement(5, 'signature', self::SIGNATURE['file']);
+
+		self::assertSame(200, $response->getStatus());
 	}
 
 	public function testEveryoneElseSavesHereAsBefore(): void {
