@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { SignerSummaryRecord } from '../../../types/index'
 
 import {
+	atLeastMinimum,
 	buildPdfEditorSignerPayload,
 	calculatePdfPlacement,
 	createPdfEditorObject,
@@ -15,6 +16,7 @@ import {
 	getPdfEditorSignerId,
 	getPdfEditorSignerLabel,
 	resolvePdfEditorSignerChange,
+	signatureMinimum,
 } from '../../../components/PdfEditor/pdfEditorModel'
 
 const createSigner = (overrides: Partial<SignerSummaryRecord> = {}): SignerSummaryRecord => ({
@@ -195,11 +197,26 @@ describe('pdfEditorModel', () => {
 				y: 20,
 				width: 30,
 				height: 40,
+				minWidth: 0,
+				minHeight: 0,
 			})
 		})
 
 		it('creates ids with the expected prefix and random suffix', () => {
 			expect(createPdfObjectId()).toMatch(/^obj-\d+-[a-z0-9]{6}$/)
+		})
+	})
+
+	describe('RULE: no signature box is smaller than the admin minimum', () => {
+		it('reads the minimum from the capabilities, 0 when there is none', () => {
+			expect(signatureMinimum({ 'signature-minimum-width': 220, 'signature-minimum-height': 70 })).toEqual({ minWidth: 220, minHeight: 70 })
+			expect(signatureMinimum(undefined)).toEqual({ minWidth: 0, minHeight: 0 })
+		})
+
+		it('scales a small box up, keeping its shape and corner, and carries the minimum', () => {
+			const minimum = { minWidth: 220, minHeight: 70 }
+			expect(atLeastMinimum({ x: 5, y: 6, width: 110, height: 20 }, minimum)).toEqual({ x: 5, y: 6, width: 385, height: 70, minWidth: 220, minHeight: 70 })
+			expect(atLeastMinimum({ width: 350, height: 100 }, minimum)).toEqual({ width: 350, height: 100, minWidth: 220, minHeight: 70 })
 		})
 	})
 })

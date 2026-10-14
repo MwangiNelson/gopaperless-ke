@@ -4,8 +4,32 @@
  */
 
 import type { PDFElementObject } from '@libresign/pdf-elements'
+import { getCapabilities } from '@nextcloud/capabilities'
 
-import type { SignerDetailRecord, SignerSummaryRecord, VisibleElementRecord } from '../../types/index'
+import type { LibresignCapabilities, SignerDetailRecord, SignerSummaryRecord, VisibleElementRecord } from '../../types/index'
+
+type SignatureMinimum = { minWidth: number, minHeight: number }
+
+/**
+ * The admin's minimum signature box in PDF points, 0 for none. Every box
+ * carries it as minWidth/minHeight, and the build lets @libresign/pdf-elements
+ * resize a box down to it and no further (vite.config.mjs).
+ */
+export function signatureMinimum(
+	config = (getCapabilities() as LibresignCapabilities).libresign?.config?.['sign-elements'],
+): SignatureMinimum {
+	return {
+		minWidth: Number(config?.['signature-minimum-width']) || 0,
+		minHeight: Number(config?.['signature-minimum-height']) || 0,
+	}
+}
+
+/** $box scaled up, keeping its shape and corner, until it is at least $minimum, which it then carries. */
+export function atLeastMinimum<T extends { width: number, height: number }>(box: T, minimum: SignatureMinimum = signatureMinimum()): T & SignatureMinimum {
+	// A box with no size yet has no shape to keep; the library sizes it.
+	const scale = box.width > 0 && box.height > 0 ? Math.max(1, minimum.minWidth / box.width, minimum.minHeight / box.height) : 1
+	return { ...box, width: box.width * scale, height: box.height * scale, ...minimum }
+}
 
 export type PdfObjectLocation = {
 	docIndex: number
@@ -194,9 +218,11 @@ export function createPdfEditorObject({
 		signer,
 		...(visibleElement ? { visibleElement } : {}),
 		...(documentIndex !== undefined ? { documentIndex } : {}),
-		x: placement.x,
-		y: placement.y,
-		width: placement.width,
-		height: placement.height,
+		...atLeastMinimum({
+			x: placement.x,
+			y: placement.y,
+			width: placement.width,
+			height: placement.height,
+		}),
 	}
 }
