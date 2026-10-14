@@ -161,6 +161,20 @@ final class SigningCardLayoutTest extends TestCase {
 		}
 	}
 
+	/** A long name stays on one line and runs on under the column, which stays against the scribble. */
+	public function testALongNameRunsOnWithoutMovingTheSuperscript(): void {
+		$name = 'BARTHOLOMEW OCHIENG WANJIKU KAMAU OTIENO NJOROGE';
+		[$xObject, [$x, , $w]] = PhpNativeHandler::signingCardLayout($this->card($name) + ['layout' => 'horizontal-top'], 350.0, 100.0);
+		preg_match_all('/\/F2 ([\d.]+) Tf [\d.]+ Tc [\d. ]+ rg ([\d.]+) [\d.]+ Td \(([^)]*)\)/', $xObject->stream, $bold, PREG_SET_ORDER);
+		preg_match('/([\d.]+) [\d.]+ Td \(ISSUER\)/', $xObject->stream, $issuer);
+
+		self::assertCount(1, $bold, 'the name on one line');
+		self::assertSame($name, $bold[0][3]);
+		self::assertEqualsWithDelta($x + $w, (float)$issuer[1], $w * 0.05, 'ISSUER still just after the scribble');
+		$textWidth = (new \ReflectionMethod(PhpNativeHandler::class, 'helveticaWidth'))->invoke(null, $name, true);
+		self::assertLessThanOrEqual(350.0, (float)$bold[0][2] + $textWidth * (float)$bold[0][1], 'the name stays inside the box');
+	}
+
 	public function testTheScribbleIsCutToItsInk(): void {
 		$canvas = imagecreatetruecolor(600, 200);
 		imagesavealpha($canvas, true);

@@ -700,7 +700,8 @@ class PhpNativeHandler extends Pkcs12Handler {
 	 *   JANE WANJIKU NJOROGE
 	 *
 	 * ISSUER and TIMESTAMP sit against the scribble's top right like a
-	 * superscript, and the name under it like the line it was signed on. It is
+	 * superscript, and the name under it like the line it was signed on, on
+	 * one line however long. It is
 	 * laid out in card units, then every size and position is scaled by one
 	 * factor and centred, so a tight box gets a smaller copy of the same card,
 	 * never a rearranged one, and nothing spills onto the page around it.
@@ -713,9 +714,9 @@ class PhpNativeHandler extends Pkcs12Handler {
 		$issuer = mb_strtoupper($card['issuer']);
 		$time = $card['time']->setTimezone(new \DateTimeZone('Africa/Nairobi'))->format('d M Y, H:i:s') . ' EAT';
 
-		// The scribble fits a 70 x 21 card-unit box, keeping its shape, its
+		// The scribble fits a 55 x 21 card-unit box, keeping its shape, its
 		// bottom left at the origin.
-		[$sw, $sh] = [70.0, 21.0];
+		[$sw, $sh] = [55.0, 21.0];
 		$image = @getimagesize($card['handwriting']);
 		$hasImage = is_array($image) && $image[0] > 0 && $image[1] > 0;
 		if ($hasImage) {
@@ -737,21 +738,14 @@ class PhpNativeHandler extends Pkcs12Handler {
 		$timeY = $timeLabelY - $label * 0.45 - $value * 0.9;
 
 		// The name runs under whichever ends lower, the scribble or the column,
-		// across the card's width at most; a long one takes two lines first.
-		$cardW = $rightX + $rightW;
-		$nameCap = 4.0;
-		$nameLines = [$name];
-		if ($cardW / max(0.01, self::helveticaWidth($name, true)) < $nameCap * 0.7 && preg_match('/\s/', $name)) {
-			$nameLines = self::balancedLines($name);
-		}
-		$widest = max(array_map(static fn (string $line): float => self::helveticaWidth($line, true), $nameLines));
-		$nameSize = min($nameCap, $cardW / max(0.01, $widest));
-		$nameTop = min(0.0, $timeY - $value * 0.25) - 1.2;
-		$nameYs = [];
-		foreach ($nameLines as $i => $line) {
-			$nameYs[] = $nameTop - $nameSize * (0.75 + $i * 1.12);
-		}
-		$bottom = end($nameYs) - $nameSize * 0.22;
+		// on one line at one size. A long name runs on under the column and
+		// widens the card; it never wraps and never moves the column.
+		// ponytail: a very long name makes the whole card smaller; a cap on the
+		// name's width (then its size) is the next step if that ever looks wrong.
+		$nameSize = 4.0;
+		$cardW = max($rightX + $rightW, self::helveticaWidth($name, true) * $nameSize);
+		$nameY = min(0.0, $timeY - $value * 0.25) - 1.2 - $nameSize * 0.75;
+		$bottom = $nameY - $nameSize * 0.22;
 
 		// One factor for everything, with a sliver of margin, centred in the box.
 		$cardH = $sh - $bottom;
@@ -770,9 +764,7 @@ class PhpNativeHandler extends Pkcs12Handler {
 			. $text('F1', $value, $valueColour, $rightX, $issuerY, $issuer)
 			. $text('F1', $label, $labelColour, $rightX, $timeLabelY, 'TIMESTAMP', $tracking)
 			. $text('F1', $value, $valueColour, $rightX, $timeY, $time);
-		foreach ($nameLines as $i => $line) {
-			$stream .= $text('F2', $nameSize, '0.04 0.07 0.13', 0.0, $nameYs[$i], $line);
-		}
+		$stream .= $text('F2', $nameSize, '0.04 0.07 0.13', 0.0, $nameY, $name);
 
 		$font = static fn (string $base): array => ['Type' => '/Font', 'Subtype' => '/Type1', 'BaseFont' => '/' . $base, 'Encoding' => '/WinAnsiEncoding'];
 		return [
