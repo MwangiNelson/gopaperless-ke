@@ -208,18 +208,28 @@ stamped with `metadata.securysign_certificate_id` and `metadata.securysign_card`
 match; a renewed certificate replaces the element, and **bumping `CARD_VERSION`
 re-imports for everyone**. Failures are logged and swallowed.
 
-The visible signature scribble comes from `GET /api/signature/visible/{sub}/image`.
-When that route gives anything but a PNG, SecurySign's card from
-`/api/signature/visible` is imported instead, stamped `securysign_card: 3`, and
-the log says `SecurySign gave no visible signature scribble; importing its card
-instead` with the status. The first sign-in after the route answers replaces the
-card with the scribble. A 403 there while every other call succeeds means the
-client is missing Keycloak's `basic` scope; see "access tokens carry no `sub`"
-below.
+Only the visible signature scribble is imported, never SecurySign's card. It
+comes from `POST /api/signature/visible/signing-context` when the account has a
+verified ID, and otherwise from `GET /api/signature/visible/{sub}/image`. That
+route serves the card when it has no scribble, tagged with the card's hash, and
+GoPaperless refuses it. With no scribble from either, the user is not ready: the
+gate sends them back to SecurySign, and the log says `SecurySign has no visible
+signature scribble for this user; sending them back to SecurySign`. The line
+before it says why:
 
-A document signed with SecurySign doesn't use the imported element. Its card
-takes the scribble from `POST /api/signature/visible/signing-context`, so a
-fallback card in the user's saved signatures never lands on the page.
+- `SecurySign sent its card, not the visible signature scribble`: SecurySign
+  holds no scribble for the account, or it runs the image route that served
+  every user the card on Postgres (fixed in SecurySign `fix/rp-image-route-scribble`).
+- `SecurySign gave no visible signature scribble` with a status: a 403 while
+  every other call succeeds means the client is missing Keycloak's `basic`
+  scope; see "access tokens carry no `sub`" below.
+
+A 5xx from that route is an outage, not "not ready".
+
+A document signed with SecurySign takes the scribble from the signing context
+too. When SecurySign has no context for the certificate, the card is drawn from
+the certificate itself (its name and issuer) around the imported scribble, never
+LibreSign's old appearance.
 
 `JSignPdfHandler` stamps the element image into the PDF
 (`$signatureImagePath = $element->getTempFile()`), so the handwriting plus the

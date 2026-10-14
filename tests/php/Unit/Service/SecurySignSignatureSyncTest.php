@@ -128,16 +128,16 @@ final class SecurySignSignatureSyncTest extends TestCase {
 		self::assertSame('7', ($fresh->getMetadata() ?? [])['securysign_certificate_id']);
 	}
 
-	public function testAFallbackCardNeverReplacesHandwriting(): void {
+	public function testAnOlderImportNeverReplacesTheScribble(): void {
 		$this->mapper->method('findMany')->willReturn([$this->element(1, '7')]);
 		$this->accounts->expects(self::never())->method('saveVisibleElement');
 
 		$this->service->syncVisibleSignature(['card' => 3] + self::CARD);
 	}
 
-	public function testHandwritingReplacesAFallbackCard(): void {
+	public function testTheScribbleReplacesAnOlderImportThatMayBeTheCard(): void {
 		$fallback = $this->element(1, '7');
-		$fallback->setMetadata(['securysign_certificate_id' => '7', 'securysign_card' => 3]);
+		$fallback->setMetadata(['securysign_certificate_id' => '7', 'securysign_card' => 4]);
 		$fresh = $this->element(2, null);
 		$this->mapper->method('findMany')->willReturnOnConsecutiveCalls([$fallback], [$fallback, $fresh]);
 		$this->accounts->expects(self::once())->method('saveVisibleElement');

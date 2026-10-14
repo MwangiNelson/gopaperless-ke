@@ -183,14 +183,13 @@ final class SecurySignServiceTest extends TestCase {
 		$png = base64_encode(self::PNG_MAGIC . 'body');
 		$certificate = ['status' => 'active', 'credentialId' => 'cred-1', 'certificate' => ['certificateId' => 7, 'certificatePem' => $pem]];
 
-		self::assertTrue($this->readiness($certificate, ['certificateId' => 7, 'imagePngBase64' => $png]));
+		self::assertTrue($this->readiness($certificate, ['certificateId' => 7, 'imagePngBase64' => $png], self::PNG_MAGIC . 'scribble'));
 		// A card left over from a previous certificate must not count as canonical.
-		self::assertFalse($this->readiness($certificate, ['certificateId' => 6, 'imagePngBase64' => $png]));
+		self::assertFalse($this->readiness($certificate, ['certificateId' => 6, 'imagePngBase64' => $png], self::PNG_MAGIC . 'scribble'));
 		// No card captured yet: onboarding, not an outage.
 		self::assertFalse($this->readiness($certificate, null));
-
-		$this->expectException(\RuntimeException::class);
-		$this->readiness($certificate, ['certificateId' => 7, 'imagePngBase64' => base64_encode('<html>')]);
+		// A card but no visible signature scribble: back to SecurySign.
+		self::assertFalse($this->readiness($certificate, ['certificateId' => 7, 'imagePngBase64' => $png]));
 	}
 
 	/**
@@ -208,7 +207,15 @@ final class SecurySignServiceTest extends TestCase {
 	/** @param string|null $contextFor the PEM the signing context names, or null when SecurySign has none */
 	private function readinessOf(array $certificate, ?array $signature, ?string $handwriting, ?string $contextScribble = null, ?string $contextFor = null): ?array {
 		$service = $this->getMockBuilder(SecurySignService::class)
-			->disableOriginalConstructor()->onlyMethods(['request', 'handwriting', 'signingContext'])->getMock();
+			->setConstructorArgs([
+				$this->createMock(IAppConfig::class),
+				$this->createMock(IConfig::class),
+				$this->createMock(ISession::class),
+				$this->createMock(IUserSession::class),
+				$this->createMock(IServerContainer::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(LoggerInterface::class),
+			])->onlyMethods(['request', 'handwriting', 'signingContext'])->getMock();
 		$service->method('request')->willReturnCallback(
 			static fn (string $path) => str_starts_with($path, 'pki/') ? $certificate : $signature,
 		);
@@ -224,10 +231,10 @@ final class SecurySignServiceTest extends TestCase {
 
 	/**
 	 * SecurySign's signature row carries its assembled card (handwriting, name,
-	 * certificate details, QR code). Drawn inside GoPaperless's own signing card,
-	 * that stamped a card within a card, so the handwriting-only image is used.
+	 * certificate details, QR code). That card never goes on a document: only
+	 * the visible signature scribble is imported.
 	 */
-	public function testTheHandwritingAloneIsImportedNotSecurySignsCard(): void {
+	public function testTheScribbleAloneIsImportedNeverSecurySignsCard(): void {
 		$pem = self::selfSignedPem();
 		$certificate = ['status' => 'active', 'credentialId' => 'cred-1', 'certificate' => ['certificateId' => 7, 'certificatePem' => $pem]];
 		$card = ['certificateId' => 7, 'imagePngBase64' => base64_encode(self::PNG_MAGIC . 'card')];
@@ -235,15 +242,14 @@ final class SecurySignServiceTest extends TestCase {
 		// The signing context's scribble comes first, even when the image route answers.
 		$context = $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'route', self::PNG_MAGIC . 'scribble');
 		self::assertSame([base64_encode(self::PNG_MAGIC . 'scribble'), SecurySignService::CARD_VERSION], [$context['imagePngBase64'], $context['card']]);
-		// Without a context, whatever the image route gives, marked below it.
+		// Without a context (no verified ID), the image route's scribble.
 		$route = $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'route');
-		self::assertSame([base64_encode(self::PNG_MAGIC . 'route'), 4], [$route['imagePngBase64'], $route['card']]);
+		self::assertSame([base64_encode(self::PNG_MAGIC . 'route'), SecurySignService::CARD_VERSION], [$route['imagePngBase64'], $route['card']]);
 		// A context for another certificate is not this signature.
 		$other = $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'route', self::PNG_MAGIC . 'scribble', self::selfSignedPem());
 		self::assertSame(base64_encode(self::PNG_MAGIC . 'route'), $other['imagePngBase64']);
-		// Without either, SecurySign's card, marked as the fallback.
-		$fallback = $this->readinessOf($certificate, $card, null);
-		self::assertSame([$card['imagePngBase64'], 3], [$fallback['imagePngBase64'], $fallback['card']]);
+		// Without either, not ready, and SecurySign's card is never the answer.
+		self::assertNull($this->readinessOf($certificate, $card, null));
 	}
 
 	public function testTheProfileLinkIsTheWebsitesCertificatePage(): void {
@@ -265,16 +271,26 @@ final class SecurySignServiceTest extends TestCase {
 	}
 
 	/**
-	 * A client without Keycloak's `basic` scope gets a 403 from this route on a
-	 * valid login. Read as a dead session, that logged the user out on every
-	 * page load: /login, Google, back to /login.
+	 * With no scribble, SecurySign's image route serves its card, tagged with
+	 * the card's own hash. A client without Keycloak's `basic` scope gets a 403
+	 * on a valid login. Neither is a dead session, and a 5xx is an outage.
 	 */
-	public function testTheHandwritingRouteNeverEndsTheSession(): void {
-		self::assertSame(self::PNG_MAGIC . 'scribble', self::serviceAnswering(200, self::PNG_MAGIC . 'scribble')->handwriting(self::IDENTITY));
-		self::assertNull(self::serviceAnswering(200, '<html>')->handwriting(self::IDENTITY));
-		foreach ([401, 403, 404, 502] as $status) {
-			self::assertNull(self::serviceAnswering($status)->handwriting(self::IDENTITY), 'HTTP ' . $status);
+	public function testTheImageRouteGivesTheScribbleNeverTheCard(): void {
+		$tagged = static fn (string $hash): string => self::PNG_MAGIC . self::pngChunk('IHDR', str_repeat("\0", 13))
+			. self::pngChunk('tEXt', "signa-image-sha256\0" . $hash) . self::pngChunk('IEND', '');
+		self::assertSame($tagged('scribble-hash'), self::serviceAnswering(200, $tagged('scribble-hash'))->handwriting(self::IDENTITY, 'card-hash'));
+		self::assertNull(self::serviceAnswering(200, $tagged('card-hash'))->handwriting(self::IDENTITY, 'card-hash'));
+		self::assertNull(self::serviceAnswering(200, self::PNG_MAGIC . self::pngChunk('IEND', ''))->handwriting(self::IDENTITY, 'card-hash'), 'untagged');
+		self::assertNull(self::serviceAnswering(200, '<html>')->handwriting(self::IDENTITY, 'card-hash'));
+		foreach ([401, 403, 404] as $status) {
+			self::assertNull(self::serviceAnswering($status)->handwriting(self::IDENTITY, 'card-hash'), 'HTTP ' . $status);
 		}
+		$this->expectExceptionCode(503);
+		self::serviceAnswering(502)->handwriting(self::IDENTITY, 'card-hash');
+	}
+
+	private static function pngChunk(string $type, string $data): string {
+		return pack('N', strlen($data)) . $type . $data . pack('N', crc32($type . $data));
 	}
 
 	private static function selfSignedPem(): string {
@@ -473,9 +489,10 @@ final class SecurySignServiceTest extends TestCase {
 		self::assertStringContainsString('opaque', SecurySignService::claimNames('not-a-jwt'));
 		self::assertStringContainsString('unreadable', SecurySignService::claimNames('a.!!!.c'));
 	}
-	public function testACurrentCertificateAndItsCardAreWhatMakeAUserReady(): void {
+	public function testACurrentCertificateAndItsScribbleAreWhatMakeAUserReady(): void {
 		$pem = self::selfSignedPem();
 		$png = base64_encode(self::PNG_MAGIC . 'body');
+		$scribble = self::PNG_MAGIC . 'scribble';
 		$session = $this->createMock(ISession::class);
 		$session->method('get')->willReturn(null);
 		$service = $this->getMockBuilder(SecurySignService::class)
@@ -496,13 +513,13 @@ final class SecurySignServiceTest extends TestCase {
 		$service->method('request')->willReturnCallback(static fn (string $path) => $path === 'pki/certificates/me'
 			? ['status' => 'active', 'credentialId' => 'c1', 'certificate' => ['certificateId' => 7, 'certificatePem' => $pem]]
 			: ['certificateId' => 7, 'imagePngBase64' => $png]);
-		$service->method('handwriting')->willReturn(null);
+		$service->method('handwriting')->willReturn($scribble);
 
 		$readiness = $service->readiness();
 
 		self::assertNotNull($readiness);
 		self::assertSame('7', $readiness['certificateId'], 'the id is normalised to a string for comparison');
-		self::assertSame($png, $readiness['imagePngBase64']);
+		self::assertSame(base64_encode($scribble), $readiness['imagePngBase64']);
 		self::assertTrue($service->isReady());
 	}
 

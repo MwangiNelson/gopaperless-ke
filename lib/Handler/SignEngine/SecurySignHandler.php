@@ -157,32 +157,50 @@ class SecurySignHandler extends Pkcs12Handler {
 	}
 
 	/**
-	 * The signing card, when SecurySign has one for the certificate about to
-	 * sign and it is still fresh. Anything else signs with the usual appearance:
-	 * a card naming another certificate would put the wrong name on the page.
+	 * The signing card: SecurySign's, when it has one for the certificate about
+	 * to sign and it is still fresh. Otherwise the same card drawn from that
+	 * certificate, so the page never falls back to LibreSign's old appearance.
+	 * A card naming another certificate would put the wrong name on the page.
 	 *
-	 * @return array{name: string, issuer: string, time: \DateTimeImmutable, handwriting: string, layout: string}|null
+	 * @return array{name: string, issuer: string, time: \DateTimeImmutable, handwriting?: string, layout: string}|null
 	 */
 	private function signingCard(string $pem): ?array {
 		$logger = \OCP\Server::get(LoggerInterface::class);
 		try {
 			$context = \OCP\Server::get(SecurySignService::class)->signingContext();
 		} catch (\Exception $e) {
-			$logger->warning('SecurySign signing card unavailable; using the usual appearance', ['exception' => $e]);
-			return null;
+			$logger->warning('SecurySign signing card unavailable; drawing it from the certificate', ['exception' => $e]);
+			return self::certificateCard($pem, $this->cardLayout());
 		}
 		if ($context === null) {
-			return null;
+			return self::certificateCard($pem, $this->cardLayout());
 		}
 		if (!hash_equals((string)openssl_x509_fingerprint($pem, 'sha256'), $context['certificateSha256'])
 			|| $context['expiresAt'] <= new \DateTimeImmutable()) {
-			$logger->warning('SecurySign signing card is for another certificate or has expired; using the usual appearance');
-			return null;
+			$logger->warning('SecurySign signing card is for another certificate or has expired; drawing it from the certificate');
+			return self::certificateCard($pem, $this->cardLayout());
 		}
 		$path = \OCP\Server::get(ITempManager::class)->getTemporaryFile('.png');
 		file_put_contents($path, $context['handwriting']);
 		return ['name' => $context['name'], 'issuer' => $context['issuer'], 'time' => $context['time'], 'handwriting' => $path,
 			'layout' => $this->cardLayout()];
+	}
+
+	/**
+	 * The card from the certificate alone: its name, its issuer and the time
+	 * now. No handwriting, so the box draws the imported visible signature
+	 * scribble. Null when the certificate names no one or no issuer.
+	 *
+	 * @return array{name: string, issuer: string, time: \DateTimeImmutable, layout: string}|null
+	 */
+	public static function certificateCard(string $pem, string $layout): ?array {
+		$parsed = openssl_x509_parse($pem) ?: [];
+		$name = $parsed['subject']['CN'] ?? '';
+		$issuer = $parsed['issuer']['CN'] ?? $parsed['issuer']['O'] ?? '';
+		if (!is_string($name) || !is_string($issuer) || trim($name) === '' || trim($issuer) === '') {
+			return null;
+		}
+		return ['name' => trim($name), 'issuer' => trim($issuer), 'time' => new \DateTimeImmutable(), 'layout' => $layout];
 	}
 
 	private function finalize(string $signature): string {

@@ -14,6 +14,7 @@ use OCA\Libresign\Db\FileElement;
 use OCA\Libresign\Handler\CertificateEngine\CertificateEngineFactory;
 use OCA\Libresign\Handler\SignEngine\PhpNativeHandler;
 use OCA\Libresign\Handler\SignEngine\Pkcs12Handler;
+use OCA\Libresign\Handler\SignEngine\SecurySignHandler;
 use OCA\Libresign\Service\DocMdp\ConfigService as DocMdpConfigService;
 use OCA\Libresign\Service\SignatureBackgroundService;
 use OCA\Libresign\Service\SignatureTextService;
@@ -186,5 +187,17 @@ final class SigningCardLayoutTest extends TestCase {
 		self::assertNull(Pkcs12Handler::builtInCard([], $params, 'stacked', $time), 'no visible box');
 		self::assertNull(Pkcs12Handler::builtInCard([new VisibleElementAssoc(new FileElement())], $params, 'stacked', $time), 'nothing drawn');
 		self::assertNull(Pkcs12Handler::builtInCard($box, ['IssuerCommonName' => ''] + $params, 'stacked', $time), 'no issuer');
+	}
+
+	/** SecurySign with no card for the certificate: the same card from the certificate, never LibreSign's old appearance. */
+	public function testWithoutSecurySignsCardTheCertificateFillsIt(): void {
+		$key = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+		$csr = openssl_csr_new(['commonName' => 'Jane Njoroge', 'organizationName' => 'Signa Hardware CA'], $key);
+		openssl_x509_export(openssl_csr_sign($csr, null, $key, 1), $pem);
+
+		$card = SecurySignHandler::certificateCard($pem, 'horizontal-top');
+		self::assertSame(['Jane Njoroge', 'Jane Njoroge', 'horizontal-top'], [$card['name'], $card['issuer'], $card['layout']], 'self-signed: issuer is the subject');
+		self::assertArrayNotHasKey('handwriting', $card, 'the box draws the imported scribble');
+		self::assertNull(SecurySignHandler::certificateCard('not a certificate', 'stacked'));
 	}
 }

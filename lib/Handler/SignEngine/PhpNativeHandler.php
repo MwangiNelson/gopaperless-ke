@@ -37,7 +37,7 @@ use SignerPHP\Infrastructure\Native\Service\XrefContentResolver;
 
 class PhpNativeHandler extends Pkcs12Handler {
 	private ?Pkcs7SignerInterface $externalSigner = null;
-	/** @var array{name: string, issuer: string, time: \DateTimeImmutable, handwriting: string}|null */
+	/** @var array{name: string, issuer: string, time: \DateTimeImmutable, handwriting?: string, layout?: string}|null */
 	private ?array $signingCard = null;
 
 	public function __construct(
@@ -74,7 +74,7 @@ class PhpNativeHandler extends Pkcs12Handler {
 	 * signer's name, the certificate's issuer and the signing time. Null goes
 	 * back to the configured appearance.
 	 *
-	 * @param array{name: string, issuer: string, time: \DateTimeImmutable, handwriting: string, layout?: string}|null $card
+	 * @param array{name: string, issuer: string, time: \DateTimeImmutable, handwriting?: string, layout?: string}|null $card
 	 */
 	public function setSigningCard(?array $card): self {
 		$this->signingCard = $card;
@@ -175,12 +175,11 @@ class PhpNativeHandler extends Pkcs12Handler {
 		string $signatureImagePath = '',
 	): SignatureAppearanceDto {
 		$rect = [$llx, $pageHeight - $ury, $urx, $pageHeight - $lly];
-		if ($this->signingCard !== null) {
-			// A SecurySign card brings its own visible signature scribble, which
-			// wins over the box's image: that image is the imported copy, and it
-			// is SecurySign's whole card while the scribble route refuses the
-			// client. The built-in card has none and draws the box's signature.
-			$card = $this->signingCard + ($signatureImagePath !== '' ? ['handwriting' => $signatureImagePath] : []);
+		if ($this->signingCard !== null && ($this->signingCard['handwriting'] ?? $signatureImagePath) !== '') {
+			// SecurySign's card brings its own visible signature scribble, which
+			// wins over the box's imported copy. A card drawn from the certificate,
+			// or the built-in one, has none and draws the box's signature.
+			$card = $this->signingCard + ['handwriting' => $signatureImagePath];
 			[$xObject, $frame] = self::signingCardLayout($card, (float)$width, (float)$height);
 			return new SignatureAppearanceDto(
 				backgroundImagePath: null,
