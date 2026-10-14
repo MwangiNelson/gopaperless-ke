@@ -146,7 +146,8 @@ final class SigningCardLayoutTest extends TestCase {
 			self::assertLessThanOrEqual($width, $at[$time][0] + $textWidth($time, false) * $at[$time][2], 'inside the box');
 
 			self::assertEqualsWithDelta($x + $w, $at['ISSUER'][0], $w * 0.05, 'ISSUER just after the scribble');
-			self::assertEqualsWithDelta($y + $h, $at['ISSUER'][1] + $at['ISSUER'][2] * 0.75, $h * 0.02, 'ISSUER level with the scribble top');
+			self::assertEqualsWithDelta($y + $h * 0.9, $at['ISSUER'][1] + $at['ISSUER'][2] * 0.75, $h * 0.02, 'ISSUER a little below the scribble top');
+			self::assertGreaterThan($at['ISSUER'][2] * 1.3, $at[$time][2], 'the values read larger than the labels');
 			$order = ['ISSUER', 'SIGNA HARDWARE CA', 'TIMESTAMP', $time];
 			for ($i = 1; $i < count($order); $i++) {
 				self::assertGreaterThan($at[$order[$i]][1], $at[$order[$i - 1]][1], $order[$i - 1] . ' above ' . $order[$i]);

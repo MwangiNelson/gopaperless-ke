@@ -724,15 +724,16 @@ class PhpNativeHandler extends Pkcs12Handler {
 			[$sw, $sh] = [$image[0] * $fit, $image[1] * $fit];
 		}
 
-		// The right column starts just after the scribble, from its top down.
+		// The right column starts just after the scribble, a tenth of its height
+		// below its top. A long issuer name shrinks the column's text.
 		$gap = 2.5;
-		$value = min(3.0, 30.0 / max(0.01, self::helveticaWidth($issuer, false), self::helveticaWidth($time, false)));
+		$value = min(2.8, 40.0 / max(0.01, self::helveticaWidth($issuer, false), self::helveticaWidth($time, false)));
 		$label = $value * 0.62;
 		$tracking = $label * 0.12;
 		$rightX = $sw + $gap;
 		$rightW = max(self::helveticaWidth($issuer, false) * $value, self::helveticaWidth($time, false) * $value,
 			self::helveticaWidth('TIMESTAMP', false) * $label + 8 * $tracking);
-		$issuerLabelY = $sh - $label * 0.75;
+		$issuerLabelY = $sh * 0.9 - $label * 0.75;
 		$issuerY = $issuerLabelY - $label * 0.45 - $value * 0.9;
 		$timeLabelY = $issuerY - $value * 0.85 - $label * 0.95;
 		$timeY = $timeLabelY - $label * 0.45 - $value * 0.9;
