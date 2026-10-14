@@ -528,9 +528,11 @@ class SecurySignService {
 	}
 
 	/**
-	 * A signature changed on SecurySign reaches GoPaperless at the next page
-	 * load, not the next sign-in. One call while nothing changed. Failures are
-	 * logged and swallowed: the gate has already let this session in.
+	 * A signature changed on SecurySign since this session last asked replaces
+	 * the copy here. Run when the user's signatures are fetched (account page,
+	 * signing panel, before signing); sign-in already does the full check. One
+	 * call while nothing changed. Failures are logged and swallowed: the gate
+	 * has already let this session in.
 	 */
 	public function refreshVisibleSignature(): void {
 		if (!$this->applies()) {

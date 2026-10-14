@@ -143,6 +143,11 @@ class SignatureElementsController extends AEnvironmentAwareController implements
 	#[ApiRoute(verb: 'GET', url: '/api/{apiVersion}/signature/elements', requirements: ['apiVersion' => '(v1)'])]
 	public function getSignatureElements(): DataResponse {
 		$userId = $this->userSession->getUser()?->getUID();
+		if ($userId) {
+			// Asked for when the account page or the signing panel opens, and
+			// before signing: a signature changed on SecurySign replaces the copy.
+			$this->securySign->refreshVisibleSignature();
+		}
 		try {
 			$elements = (
 				$userId

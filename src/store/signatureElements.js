@@ -32,12 +32,14 @@ const _signatureElementsStore = defineStore('signatureElements', () => {
 	const error = ref('')
 	const initialized = ref(false)
 
-	const loadSignatures = async () => {
-		if (initialized.value) {
+	// fresh asks the server again instead of trusting the page's copy, which
+	// also re-checks a SecurySign user's signature with SecurySign.
+	const loadSignatures = async (fresh = false) => {
+		if (initialized.value && !fresh) {
 			return
 		}
 
-		const userSignatures = loadState('libresign', 'user_signatures', false)
+		const userSignatures = !fresh && loadState('libresign', 'user_signatures', false)
 		if (userSignatures) {
 			signRequestUuid.value = loadState('libresign', 'sign_request_uuid', '')
 			userSignatures.forEach(element => {
@@ -60,12 +62,18 @@ const _signatureElementsStore = defineStore('signatureElements', () => {
 
 		await axios(config)
 			.then(({ data }) => {
+				if (fresh) {
+					signs.value = { signature: createEmptyElement(), initial: createEmptyElement() }
+				}
 				data.ocs.data.elements.forEach(current => {
 					signs.value[current.type] = current
 				})
 			})
 			.catch(({ data }) => {
-				error.value = { message: data.ocs.data.message }
+				// A fresh load that fails keeps the signatures already shown.
+				if (!fresh) {
+					error.value = { message: data.ocs.data.message }
+				}
 			})
 
 		initialized.value = true

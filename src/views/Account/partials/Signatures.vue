@@ -32,13 +32,19 @@
 import { t } from '@nextcloud/l10n'
 
 import { getCapabilities } from '@nextcloud/capabilities'
+import { onMounted } from 'vue'
 
 import Signature from './Signature.vue'
+import { useSignatureElementsStore } from '../../../store/signatureElements.js'
 import type { LibresignCapabilities } from '../../../types/index'
 
 defineOptions({
 	name: 'Signatures',
 })
+
+// A signature changed on SecurySign shows here when the page opens.
+const signatureElementsStore = useSignatureElementsStore()
+onMounted(() => signatureElementsStore.loadSignatures(true))
 
 function isSignaturesAvailable() {
 	const capabilities = getCapabilities() as LibresignCapabilities

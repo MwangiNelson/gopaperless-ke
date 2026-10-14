@@ -896,6 +896,9 @@ async function onSecurySignApproved(signature: string) {
 async function confirmSignDocument() {
 	busy.value = true
 	try {
+		// The signature that goes on the document is the current one, even if
+		// it was changed on SecurySign since the panel opened.
+		await signatureElementsStore.loadSignatures(true)
 		await startSigning()
 	} finally {
 		busy.value = false
@@ -1031,7 +1034,7 @@ watch(showPaymentModal, value => {
 onMounted(async () => {
 	loading.value = true
 	signatureElementsStore.signRequestUuid = signRequestUuid.value
-	signatureElementsStore.loadSignatures()
+	signatureElementsStore.loadSignatures(true)
 
 
 	const signerUuid = signRequestUuid.value || route?.params?.uuid

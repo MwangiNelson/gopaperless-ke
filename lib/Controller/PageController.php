@@ -548,9 +548,6 @@ class PageController extends AEnvironmentPageAwareController {
 	private function provideSignerSignatues(): void {
 		$signatures = [];
 		if ($this->userSession->getUser()) {
-			// The signing step shows this list: a signature changed on SecurySign
-			// replaces the copy here first.
-			\OCP\Server::get(SecurySignService::class)->refreshVisibleSignature();
 			$signatures = $this->signerElementsService->getUserElements($this->userSession->getUser()->getUID());
 		} else {
 			$signatures = $this->signerElementsService->getElementsFromSessionAsArray();

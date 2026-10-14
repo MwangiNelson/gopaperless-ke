@@ -392,6 +392,37 @@ describe('signatureElements store - signature business rules', () => {
 		})
 	})
 
+	describe('RULE: a fresh load asks the server again', () => {
+		it('skips the page copy and replaces what is shown', async () => {
+			loadStateMock.mockImplementation((app, key, defaultValue) => key === 'user_signatures'
+				? [{ type: 'signature', createdAt: '2024-01-01', file: { url: '/old.png', nodeId: 1 } }]
+				: defaultValue)
+			axiosMock.mockResolvedValue({
+				data: { ocs: { data: { elements: [{ type: 'signature', createdAt: '2024-02-02', file: { url: '/new.png', nodeId: 2 } }] } } },
+			})
+
+			const store = useSignatureElementsStore()
+			expect(axiosMock).not.toHaveBeenCalled()
+			await store.loadSignatures(true)
+
+			expect(axiosMock).toHaveBeenCalledWith(expect.objectContaining({ method: 'get' }))
+			expect(store.signs.signature.file.nodeId).toBe(2)
+		})
+
+		it('keeps what is shown when the server cannot answer', async () => {
+			loadStateMock.mockImplementation((app, key, defaultValue) => key === 'user_signatures'
+				? [{ type: 'signature', createdAt: '2024-01-01', file: { url: '/old.png', nodeId: 1 } }]
+				: defaultValue)
+			axiosMock.mockRejectedValue({})
+
+			const store = useSignatureElementsStore()
+			await store.loadSignatures(true)
+
+			expect(store.signs.signature.file.nodeId).toBe(1)
+			expect(store.error).toBe('')
+		})
+	})
+
 	describe('RULE: error handling', () => {
 		it('save should capture error with errors field', async () => {
 			loadStateMock.mockReturnValue([])

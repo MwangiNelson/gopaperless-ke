@@ -86,6 +86,16 @@ final class SignatureElementsControllerSecurySignTest extends TestCase {
 		self::assertSame(200, $response->getStatus());
 	}
 
+	/** Fetching the signatures is when a change made on SecurySign is picked up. */
+	public function testFetchingTheSignaturesChecksSecurySignFirst(): void {
+		$securySign = $this->createMock(SecurySignService::class);
+		$securySign->expects(self::once())->method('refreshVisibleSignature');
+
+		$response = $this->controller(true, $this->createMock(AccountService::class), $securySign)->getSignatureElements();
+
+		self::assertSame(200, $response->getStatus());
+	}
+
 	public function testEveryoneElseSavesHereAsBefore(): void {
 		$securySign = $this->createMock(SecurySignService::class);
 		$securySign->expects(self::never())->method('saveDrawnSignature');
