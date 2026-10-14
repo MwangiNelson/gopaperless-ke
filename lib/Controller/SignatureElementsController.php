@@ -12,6 +12,7 @@ use OCA\Libresign\AppInfo\Application;
 use OCA\Libresign\Helper\ValidateHelper;
 use OCA\Libresign\Middleware\Attribute\RequireSignRequestUuid;
 use OCA\Libresign\Service\AccountService;
+use OCA\Libresign\Service\SecurySignService;
 use OCA\Libresign\Service\SessionService;
 use OCA\Libresign\Service\SignatureTextService;
 use OCA\Libresign\Service\SignerElementsService;
@@ -56,6 +57,7 @@ class SignatureElementsController extends AEnvironmentAwareController implements
 		protected IMimeIconProvider $mimeIconProvider,
 		protected IURLGenerator $urlGenerator,
 		private ValidateHelper $validateHelper,
+		private SecurySignService $securySign,
 	) {
 		parent::__construct(Application::APP_ID, $request);
 	}
@@ -77,13 +79,27 @@ class SignatureElementsController extends AEnvironmentAwareController implements
 	#[OpenAPI(tags: ['signing'])]
 	#[ApiRoute(verb: 'POST', url: '/api/{apiVersion}/signature/elements', requirements: ['apiVersion' => '(v1)'])]
 	public function createSignatureElement(array $elements): DataResponse {
+		$count = count($elements);
 		try {
 			$this->validateHelper->validateVisibleElements($elements, $this->validateHelper::TYPE_VISIBLE_ELEMENT_USER);
-			$this->accountService->saveVisibleElements(
-				elements: $elements,
-				sessionId: $this->sessionService->getSessionId(),
-				user: $this->userSession->getUser(),
-			);
+			// A SecurySign user's signature belongs to SecurySign, so it is saved
+			// there and comes back as their imported one. This runs only when
+			// SecurySign gave GoPaperless no scribble for them.
+			if ($this->securySign->applies()) {
+				foreach ($elements as $i => $element) {
+					if (($element['type'] ?? '') === 'signature') {
+						$this->securySign->saveDrawnSignature((string)($element['file']['base64'] ?? ''));
+						unset($elements[$i]);
+					}
+				}
+			}
+			if ($elements !== []) {
+				$this->accountService->saveVisibleElements(
+					elements: array_values($elements),
+					sessionId: $this->sessionService->getSessionId(),
+					user: $this->userSession->getUser(),
+				);
+			}
 		} catch (\Throwable $th) {
 			return new DataResponse(
 				[
@@ -92,7 +108,7 @@ class SignatureElementsController extends AEnvironmentAwareController implements
 				Http::STATUS_UNPROCESSABLE_ENTITY
 			);
 		}
-		if (count($elements) === 1) {
+		if ($count === 1) {
 			$message = $this->l10n->t('Element created with success');
 		} else {
 			$message = $this->l10n->t('Elements created with success');

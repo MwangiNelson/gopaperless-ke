@@ -188,8 +188,8 @@ final class SecurySignServiceTest extends TestCase {
 		self::assertFalse($this->readiness($certificate, ['certificateId' => 6, 'imagePngBase64' => $png], self::PNG_MAGIC . 'scribble'));
 		// No card captured yet: onboarding, not an outage.
 		self::assertFalse($this->readiness($certificate, null));
-		// A card but no visible signature scribble: back to SecurySign.
-		self::assertFalse($this->readiness($certificate, ['certificateId' => 7, 'imagePngBase64' => $png]));
+		// A card but no visible signature scribble: in, to draw one in GoPaperless.
+		self::assertTrue($this->readiness($certificate, ['certificateId' => 7, 'imagePngBase64' => $png]));
 	}
 
 	/**
@@ -248,8 +248,19 @@ final class SecurySignServiceTest extends TestCase {
 		// A context for another certificate is not this signature.
 		$other = $this->readinessOf($certificate, $card, self::PNG_MAGIC . 'route', self::PNG_MAGIC . 'scribble', self::selfSignedPem());
 		self::assertSame(base64_encode(self::PNG_MAGIC . 'route'), $other['imagePngBase64']);
-		// Without either, not ready, and SecurySign's card is never the answer.
-		self::assertNull($this->readinessOf($certificate, $card, null));
+		// Without either, no image: the user draws one, and SecurySign's card is never the answer.
+		self::assertSame('', $this->readinessOf($certificate, $card, null)['imagePngBase64']);
+	}
+
+	/** Drawn in GoPaperless for an account SecurySign has no scribble for, and kept by SecurySign. */
+	public function testADrawnScribbleIsSavedToSecurySign(): void {
+		$png = self::PNG_MAGIC . 'drawn';
+		self::$posts = [];
+		self::serviceAnswering(200, '{"id":3,"certificateId":7}')->saveDrawnSignature('data:image/png;base64,' . base64_encode($png));
+		self::assertSame(['imagePngBase64' => base64_encode($png), 'sourceType' => 'draw'], self::$posts[0]['json']);
+
+		$this->expectExceptionMessage('SecurySign could not save your signature: Invalid image');
+		self::serviceAnswering(400, '{"error":"Invalid image"}')->saveDrawnSignature('data:image/png;base64,' . base64_encode($png));
 	}
 
 	public function testTheProfileLinkIsTheWebsitesCertificatePage(): void {

@@ -91,6 +91,23 @@ final class SecurySignSignatureSyncTest extends TestCase {
 		$this->service->syncVisibleSignature(self::CARD);
 	}
 
+	/**
+	 * SecurySign has no scribble for an old account, only its card. An older
+	 * import may be that card, so it goes and the user draws one; the current
+	 * import, or a local drawing, stays.
+	 */
+	public function testWithoutAScribbleAnImportThatMayBeTheCardGoes(): void {
+		$card = $this->element(1, '7');
+		$card->setMetadata(['securysign_certificate_id' => '7', 'securysign_card' => 4]);
+		$current = $this->element(2, '7');
+		$local = $this->element(3, null);
+		$this->mapper->method('findMany')->willReturn([$card, $current, $local]);
+		$this->accounts->expects(self::never())->method('saveVisibleElement');
+		$this->mapper->expects(self::once())->method('delete')->with($card);
+
+		$this->service->syncVisibleSignature(['imagePngBase64' => ''] + self::CARD);
+	}
+
 	public function testAFirstCardIsImportedAndStampedWithItsCertificate(): void {
 		$imported = $this->element(9, null);
 		$this->mapper->method('findMany')->willReturnOnConsecutiveCalls([], [$imported]);

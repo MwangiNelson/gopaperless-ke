@@ -217,10 +217,12 @@ Only the visible signature scribble is imported, never SecurySign's card. It
 comes from `POST /api/signature/visible/signing-context` when the account has a
 verified ID, and otherwise from `GET /api/signature/visible/{sub}/image`. That
 route serves the card when it has no scribble, tagged with the card's hash, and
-GoPaperless refuses it. With no scribble from either, the user is not ready: the
-gate sends them back to SecurySign, and the log says `SecurySign has no visible
-signature scribble for this user; sending them back to SecurySign`. The line
-before it says why:
+GoPaperless refuses it. With no scribble from either, an import that may be the
+card is deleted and the user is let in without a signature. GoPaperless asks
+them to draw one ("Define your signature") and saves it to SecurySign with
+`POST /api/signature/visible` and their login, so SecurySign keeps it for every
+app. The log says `SecurySign has no visible signature scribble for this user;
+they draw one in GoPaperless`. The line before it says why:
 
 - `SecurySign sent its card, not the visible signature scribble`: SecurySign
   holds no scribble for the account, or it runs the image route that served

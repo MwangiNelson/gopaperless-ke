@@ -311,19 +311,19 @@ class SecurySignService {
 		// The row says which certificate the signature belongs to. Its image is
 		// SecurySign's assembled card, which never goes on a document. The
 		// scribble alone comes from the signing context, which needs a verified
-		// ID, or else from the image route. With neither, the user is not ready
-		// and the gate sends them back to SecurySign.
+		// ID, or else from the image route. With neither (an account older than
+		// SecurySign's separate scribble), the user draws one in GoPaperless,
+		// which saves it to SecurySign: see saveDrawnSignature().
 		$scribble = $this->contextScribble((string)$leaf['certificatePem'])
 			?? $this->handwriting($identity, (string)($signature['imageSha256'] ?? ''));
 		if ($scribble === null) {
-			$this->logger->warning('SecurySign has no visible signature scribble for this user; sending them back to SecurySign', [
+			$this->logger->warning('SecurySign has no visible signature scribble for this user; they draw one in GoPaperless', [
 				'certificateId' => (string)$leaf['certificateId'],
 			]);
-			return null;
 		}
 		return [
 			'certificateId' => (string)$leaf['certificateId'],
-			'imagePngBase64' => base64_encode($scribble),
+			'imagePngBase64' => $scribble === null ? '' : base64_encode($scribble),
 			'card' => self::CARD_VERSION,
 			'issuer' => (string)($leaf['issuer'] ?? 'SecurySign'),
 			'serial' => (string)($leaf['serialNumberHex'] ?? ''),
@@ -427,6 +427,19 @@ class SecurySignService {
 			// reaches this class, so constructor injection would not build.
 			$mapper = $this->container->get(\OCA\Libresign\Db\UserElementMapper::class);
 			$existing = $mapper->findMany(['user_id' => $user->getUID(), 'type' => 'signature']);
+			if ($readiness['imagePngBase64'] === '') {
+				// SecurySign has no scribble. An import older than the current
+				// version may be its card: it goes, and LibreSign asks for a
+				// signature, which createSignatureElement sends to SecurySign.
+				foreach ($existing as $element) {
+					$metadata = $element->getMetadata() ?? [];
+					if (isset($metadata['securysign_certificate_id'])
+						&& ($metadata['securysign_certificate_id'] !== $readiness['certificateId'] || ($metadata['securysign_card'] ?? 0) < self::CARD_VERSION)) {
+						$mapper->delete($element);
+					}
+				}
+				return;
+			}
 			// Both the certificate and the card layout have to match. Without the
 			// version, changing the card design would leave every existing user on
 			// the old image forever, because their certificate had not changed. An
@@ -471,6 +484,38 @@ class SecurySignService {
 		} catch (\Throwable $e) {
 			$this->logger->error('Could not import the SecurySign visible signature', ['exception' => $e]);
 		}
+	}
+
+	/**
+	 * A visible signature scribble drawn in GoPaperless, for someone SecurySign
+	 * has none for. SecurySign keeps it, so every app gets it from now on, and
+	 * it becomes the signature here just as an imported one does. $image is the
+	 * signature box's data URL. Throws with SecurySign's reason when it refuses.
+	 */
+	public function saveDrawnSignature(string $image): void {
+		$png = base64_decode((string)preg_replace('~^data:image/png;base64,~', '', $image), true);
+		if (!is_string($png) || !str_starts_with($png, "\x89PNG\r\n\x1a\n")) {
+			throw new \RuntimeException('Draw your signature again.', 400);
+		}
+		$identity = $this->identity();
+		$response = $this->send('post', $this->signingOrigin() . '/api/signature/visible', [
+			'headers' => ['Authorization' => 'Bearer ' . $identity['accessToken'], 'Accept' => 'application/json'],
+			'json' => ['imagePngBase64' => base64_encode($png), 'sourceType' => 'draw'],
+		]);
+		$body = json_decode((string)$response->getBody(), true);
+		if ($response->getStatusCode() !== 200 || !is_array($body) || empty($body['certificateId'])) {
+			$reason = is_array($body) && is_string($body['error'] ?? null) ? substr($body['error'], 0, 200) : '';
+			$this->logger->warning('SecurySign refused a visible signature scribble drawn in GoPaperless', [
+				'status' => $response->getStatusCode(),
+				'error' => $reason,
+			]);
+			throw new \RuntimeException('SecurySign could not save your signature' . ($reason === '' ? '. Please try again.' : ': ' . $reason), 503);
+		}
+		$this->syncVisibleSignature([
+			'certificateId' => (string)$body['certificateId'],
+			'imagePngBase64' => base64_encode($png),
+			'card' => self::CARD_VERSION,
+		]);
 	}
 
 	/** The next isReady() asks SecurySign again instead of trusting the session. */
