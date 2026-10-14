@@ -493,9 +493,12 @@ class SecurySignService {
 	 * signature box's data URL. Throws with SecurySign's reason when it refuses.
 	 */
 	public function saveDrawnSignature(string $image): void {
-		$png = base64_decode((string)preg_replace('~^data:image/png;base64,~', '', $image), true);
+		// Any data URL prefix: the typed signature arrives as
+		// data:application/octet-streamng;base64, (LibreSign's TextInput.vue).
+		// The bytes decide what it is.
+		$png = base64_decode(str_starts_with($image, 'data:') ? substr($image, (int)strpos($image, ',') + 1) : $image, true);
 		if (!is_string($png) || !str_starts_with($png, "\x89PNG\r\n\x1a\n")) {
-			throw new \RuntimeException('Draw your signature again.', 400);
+			throw new \RuntimeException('Your signature could not be read. Please try again.', 400);
 		}
 		$identity = $this->identity();
 		$response = $this->send('post', $this->signingOrigin() . '/api/signature/visible', [

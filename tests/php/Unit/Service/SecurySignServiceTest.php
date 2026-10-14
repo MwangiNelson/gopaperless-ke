@@ -258,6 +258,9 @@ final class SecurySignServiceTest extends TestCase {
 		self::$posts = [];
 		self::serviceAnswering(200, '{"id":3,"certificateId":7}')->saveDrawnSignature('data:image/png;base64,' . base64_encode($png));
 		self::assertSame(['imagePngBase64' => base64_encode($png), 'sourceType' => 'draw'], self::$posts[0]['json']);
+		// A typed signature comes labelled this way by LibreSign's text editor.
+		self::serviceAnswering(200, '{"id":3,"certificateId":7}')->saveDrawnSignature('data:application/octet-streamng;base64,' . base64_encode($png));
+		self::assertSame(base64_encode($png), self::$posts[1]['json']['imagePngBase64'], 'typed');
 
 		$this->expectExceptionMessage('SecurySign could not save your signature: Invalid image');
 		self::serviceAnswering(400, '{"error":"Invalid image"}')->saveDrawnSignature('data:image/png;base64,' . base64_encode($png));
