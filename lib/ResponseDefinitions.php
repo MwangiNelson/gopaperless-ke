@@ -693,8 +693,6 @@ namespace OCA\Libresign;
  *             full-signature-height: float,
  *             signature-width: float,
  *             signature-height: float,
- *             signature-minimum-width: float,
- *             signature-minimum-height: float,
  *         },
  *         envelope: array{
  *             is-available: bool,

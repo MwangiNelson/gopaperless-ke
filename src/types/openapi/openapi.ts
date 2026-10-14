@@ -1093,8 +1093,6 @@ export type components = {
                     "signature-width": number;
                     /** Format: double */
                     "signature-height": number;
-                    "signature-minimum-width": number;
-                    "signature-minimum-height": number;
                 };
                 envelope: {
                     "is-available": boolean;

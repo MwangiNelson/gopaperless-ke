@@ -29,25 +29,6 @@ export default createAppConfig({
 		},
 		plugins: [
 			{
-				// ponytail: @libresign/pdf-elements resizes a box down to a fixed
-				// 16 px and has no minimum of its own. This raises that floor to the
-				// box's minWidth/minHeight (pdfEditorModel.ts atLeastMinimum), so a
-				// box can't be dragged smaller than the admin's minimum signature
-				// size. Replace with a library option once it has one; the build
-				// fails if an update moves the code this relies on.
-				name: 'pdf-elements-minimum-box',
-				transform(code, id) {
-					if (!id.replaceAll('\\', '/').includes('@libresign/pdf-elements/dist/index.mjs')) {
-						return null
-					}
-					const floor = '16 / (this.pagesScale || 1)'
-					if (code.split(floor).length !== 2) {
-						this.error('@libresign/pdf-elements changed: the resize floor this build raises to the minimum signature size is gone')
-					}
-					return code.replace(floor, `Math.max(${floor}, this.object.minWidth || 0, (this.object.minHeight || 0) * this.aspectRatio)`)
-				},
-			},
-			{
 				name: 'vue-devtools',
 				config(_, { mode }) {
 					return {

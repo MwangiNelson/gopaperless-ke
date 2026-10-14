@@ -51,10 +51,6 @@ class Capabilities implements IPublicCapability {
 					'full-signature-height' => $this->signatureTextService->getFullSignatureHeight(),
 					'signature-width' => $this->signatureTextService->getSignatureWidth(),
 					'signature-height' => $this->signatureTextService->getSignatureHeight(),
-					// The smallest signature box the editor lets anyone draw, 0 when the
-					// admin sets none. The server enforces the same when it saves one.
-					'signature-minimum-width' => $this->signatureTextService->getMinimumSignatureEnabled() ? $this->signatureTextService->getMinimumSignatureWidth() : 0.0,
-					'signature-minimum-height' => $this->signatureTextService->getMinimumSignatureEnabled() ? $this->signatureTextService->getMinimumSignatureHeight() : 0.0,
 				],
 				'envelope' => [
 					'is-available' => $this->envelopeService->isEnabled(),
