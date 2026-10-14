@@ -32,7 +32,7 @@ use Psr\Log\LoggerInterface;
  * than leave two.
  */
 final class SecurySignSignatureSyncTest extends TestCase {
-	private const CARD = ['certificateId' => '7', 'imagePngBase64' => 'cGluZw==', 'card' => SecurySignService::CARD_VERSION,
+	private const CARD = ['certificateId' => '7', 'imagePngBase64' => 'cGluZw==', 'imageSha256' => 'aa11', 'card' => SecurySignService::CARD_VERSION,
 		'issuer' => 'Test CA', 'serial' => 'AA BB', 'validFrom' => '1 Jan 2026', 'validUntil' => '1 Jan 2027'];
 
 	private UserElementMapper&MockObject $mapper;
@@ -78,7 +78,8 @@ final class SecurySignSignatureSyncTest extends TestCase {
 		$element->setType('signature');
 		$element->setUserId('someone@example.test');
 		if ($certificateId !== null) {
-			$element->setMetadata(['securysign_certificate_id' => $certificateId, 'securysign_card' => SecurySignService::CARD_VERSION]);
+			$element->setMetadata(['securysign_certificate_id' => $certificateId, 'securysign_card' => SecurySignService::CARD_VERSION,
+				'securysign_image_sha256' => 'aa11']);
 		}
 		return $element;
 	}
@@ -156,6 +157,56 @@ final class SecurySignSignatureSyncTest extends TestCase {
 
 		self::assertSame([1], $deleted, 'only the card from the superseded certificate goes');
 		self::assertSame('7', ($fresh->getMetadata() ?? [])['securysign_certificate_id']);
+	}
+
+	/** The user redrew on SecurySign: same certificate, new signature hash. */
+	public function testASignatureChangedOnSecurySignReplacesTheCopyHere(): void {
+		$old = $this->element(1, '7');
+		$fresh = $this->element(2, null);
+		$this->mapper->method('findMany')->willReturnOnConsecutiveCalls([$old], [$old, $fresh]);
+		$this->accounts->expects(self::once())->method('saveVisibleElement');
+		$this->mapper->expects(self::once())->method('delete')->with($old);
+
+		$this->service->syncVisibleSignature(['imageSha256' => 'bb22'] + self::CARD);
+
+		self::assertSame('bb22', ($fresh->getMetadata() ?? [])['securysign_image_sha256']);
+	}
+
+	private function refreshing(?array $cached, array $signature): SecurySignService&MockObject {
+		$session = $this->createMock(ISession::class);
+		$session->method('get')->willReturn($cached);
+		$service = $this->getMockBuilder(SecurySignService::class)
+			->setConstructorArgs([
+				$this->createMock(IAppConfig::class),
+				$this->createMock(IConfig::class),
+				$session,
+				$this->createMock(IUserSession::class),
+				$this->createMock(IServerContainer::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(LoggerInterface::class),
+			])->onlyMethods(['applies', 'identity', 'request', 'isReady'])->getMock();
+		$service->method('applies')->willReturn(true);
+		$service->method('identity')->willReturn(['sub' => 'google-oauth2|1', 'issuer' => 'https://idp.test/realms/signa', 'accessToken' => 'at']);
+		$service->expects(self::once())->method('request')->with('signature/visible')->willReturn($signature);
+		return $service;
+	}
+
+	private static function cachedFor(string $imageSha256): array {
+		return ['identity' => hash('sha256', "https://idp.test/realms/signa\0google-oauth2|1"), 'ready' => true, 'imageSha256' => $imageSha256];
+	}
+
+	public function testAnUnchangedSignatureCostsOneCallOnAPageLoad(): void {
+		$service = $this->refreshing(self::cachedFor('aa11'), ['certificateId' => 7, 'imageSha256' => 'aa11']);
+		$service->expects(self::never())->method('isReady');
+
+		$service->refreshVisibleSignature();
+	}
+
+	public function testASignatureChangedOnSecurySignIsImportedAtTheNextPageLoad(): void {
+		$service = $this->refreshing(self::cachedFor('aa11'), ['certificateId' => 7, 'imageSha256' => 'bb22']);
+		$service->expects(self::once())->method('isReady')->with(true);
+
+		$service->refreshVisibleSignature();
 	}
 
 	public function testAnOlderImportNeverReplacesTheScribble(): void {

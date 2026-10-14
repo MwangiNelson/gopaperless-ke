@@ -282,7 +282,7 @@ class SecurySignService {
 	 * gate on readiness and mirror the signature without asking twice.
 	 *
 	 * @param array{sub: string, issuer: string, accessToken: string}|null $identity
-	 * @return array{certificateId: string, imagePngBase64: string, card: int, issuer: string, serial: string, validFrom: string, validUntil: string}|null
+	 * @return array{certificateId: string, imagePngBase64: string, imageSha256: string, card: int, issuer: string, serial: string, validFrom: string, validUntil: string}|null
 	 */
 	public function readiness(?array $identity = null): ?array {
 		$identity ??= $this->identity();
@@ -324,6 +324,9 @@ class SecurySignService {
 		return [
 			'certificateId' => (string)$leaf['certificateId'],
 			'imagePngBase64' => $scribble === null ? '' : base64_encode($scribble),
+			// Changes whenever the signature changes on SecurySign: how a redraw
+			// there is noticed here (refreshVisibleSignature()).
+			'imageSha256' => (string)($signature['imageSha256'] ?? ''),
 			'card' => self::CARD_VERSION,
 			'issuer' => (string)($leaf['issuer'] ?? 'SecurySign'),
 			'serial' => (string)($leaf['serialNumberHex'] ?? ''),
@@ -414,7 +417,7 @@ class SecurySignService {
 	 * the card is already verified, and failing to cache it locally is no reason
 	 * to lock someone out of the app.
 	 *
-	 * @param array{certificateId: string, imagePngBase64: string, card: int} $readiness
+	 * @param array{certificateId: string, imagePngBase64: string, imageSha256?: string, card: int} $readiness
 	 * @param bool $replace true for a signature just drawn: it replaces the current one even when that one is up to date
 	 */
 	public function syncVisibleSignature(array $readiness, bool $replace = false): void {
@@ -440,15 +443,16 @@ class SecurySignService {
 				}
 				return;
 			}
-			// Both the certificate and the card layout have to match. Without the
-			// version, changing the card design would leave every existing user on
-			// the old image forever, because their certificate had not changed. An
-			// older import, which may be SecurySign's card, gives way to the
-			// visible signature scribble at the next sign-in.
+			// The certificate, the card layout and SecurySign's signature all have
+			// to match. Without the version, changing the card design would leave
+			// every existing user on the old image forever, because their
+			// certificate had not changed. Without the signature's hash, a redraw
+			// on SecurySign would never replace the copy here.
 			foreach ($replace ? [] : $existing as $element) {
 				$metadata = $element->getMetadata() ?? [];
 				if (($metadata['securysign_certificate_id'] ?? null) === $readiness['certificateId']
-					&& ($metadata['securysign_card'] ?? 0) >= $readiness['card']) {
+					&& ($metadata['securysign_card'] ?? 0) >= $readiness['card']
+					&& ($metadata['securysign_image_sha256'] ?? '') === ($readiness['imageSha256'] ?? '')) {
 					return;
 				}
 			}
@@ -474,6 +478,7 @@ class SecurySignService {
 				$element->setMetadata(($element->getMetadata() ?? []) + [
 					'securysign_certificate_id' => $readiness['certificateId'],
 					'securysign_card' => $readiness['card'],
+					'securysign_image_sha256' => $readiness['imageSha256'] ?? '',
 				]);
 				$mapper->update($element);
 			}
@@ -517,8 +522,32 @@ class SecurySignService {
 		$this->syncVisibleSignature([
 			'certificateId' => (string)$body['certificateId'],
 			'imagePngBase64' => base64_encode($png),
+			'imageSha256' => (string)($body['imageSha256'] ?? ''),
 			'card' => self::CARD_VERSION,
 		], true);
+	}
+
+	/**
+	 * A signature changed on SecurySign reaches GoPaperless at the next page
+	 * load, not the next sign-in. One call while nothing changed. Failures are
+	 * logged and swallowed: the gate has already let this session in.
+	 */
+	public function refreshVisibleSignature(): void {
+		if (!$this->applies()) {
+			return;
+		}
+		try {
+			$identity = $this->identity();
+			$signature = $this->request('signature/visible', true, $identity);
+			$cached = $this->session->get(self::READINESS_CACHE_KEY);
+			if (is_array($cached) && ($cached['identity'] ?? null) === self::cacheKey($identity)
+				&& ($cached['imageSha256'] ?? null) === (string)($signature['imageSha256'] ?? '')) {
+				return;
+			}
+			$this->isReady(true);
+		} catch (\Throwable $e) {
+			$this->logger->info('Could not check SecurySign for a changed visible signature', ['exception' => $e]);
+		}
 	}
 
 	/** The next isReady() asks SecurySign again instead of trusting the session. */
@@ -535,6 +564,7 @@ class SecurySignService {
 		$this->session->set(self::READINESS_CACHE_KEY, [
 			'identity' => $identity,
 			'ready' => $readiness !== null,
+			'imageSha256' => $readiness['imageSha256'] ?? null,
 			// Kept for the account page, so showing it costs no request.
 			'certificate' => $readiness === null ? null : [
 				'issuer' => $readiness['issuer'],
