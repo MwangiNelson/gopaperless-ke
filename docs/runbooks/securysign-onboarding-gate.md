@@ -34,7 +34,12 @@ GoPaperless: **Administration settings → LibreSign** has four SecurySign secti
 - **Sign with SecurySign:** a switch and the signing (SSC) secret. The switch
   can only be on once a provider and the secret are set.
 - **MIMI passkey check:** a switch, the MIMI address, client ID and secret. The
-  switch can only be on once a provider and the secret are set.
+  switch can only be on once a provider and the secret are set. Someone with no
+  MIMI passkey is sent to MIMI's `/enrol` to make one, whichever enrolment site
+  is chosen, and comes back to the check. MIMI runs whatever GoPaperless's MIMI
+  steps they haven't done (for someone who enrolled through the website, the ID,
+  face and questions too) and moves their SecurySign certificate onto the new
+  passkey. MIMI only returns people to addresses registered for the client.
 - **Enrolment for users without a certificate:** the TendaWorld website or
   MIMI. MIMI enrolment uses the MIMI address and client ID from the section
   above, and MIMI only returns people to addresses registered for that client.

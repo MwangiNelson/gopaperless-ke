@@ -565,11 +565,19 @@ class SecurySignService {
 	 */
 	public function enrolmentUrl(string $state, string $sub, string $email, string $returnUrl): string {
 		if ($this->config->getValueString(Application::APP_ID, 'enrolment_site', 'tendaworld') === 'mimi') {
-			// MIMI sets up this account (it switches if signed in as another one,
-			// asking for this email), then sends the user to our return route.
-			return $this->mimiOrigin() . '/enrol?' . http_build_query(['sub' => $sub, 'email' => $email, 'returnTo' => $returnUrl]);
+			return $this->mimiEnrolmentUrl($sub, $email, $returnUrl);
 		}
 		return $this->websiteOrigin() . '/onboarding/gopaperless?' . http_build_query(['state' => $state, 'subject' => $sub]);
+	}
+
+	/**
+	 * MIMI's enrolment for this account. MIMI switches to it if signed in as
+	 * another one, asking for this email, runs the steps still missing (a
+	 * SecurySign certificate made elsewhere is moved onto the new MIMI passkey),
+	 * then sends the user to $returnUrl if it is one of our addresses MIMI has.
+	 */
+	public function mimiEnrolmentUrl(string $sub, string $email, string $returnUrl): string {
+		return $this->mimiOrigin() . '/enrol?' . http_build_query(['sub' => $sub, 'email' => $email, 'returnTo' => $returnUrl]);
 	}
 
 	/**
